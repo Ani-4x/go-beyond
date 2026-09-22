@@ -3,8 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AccountSheet } from '../components/AccountSheet';
 import { AppText } from '../components/AppText';
+import { Icon } from '../components/Icons';
 import { Legend } from '../components/Legend';
+import { PressableScale } from '../components/PressableScale';
 import { RadarChart } from '../components/RadarChart';
 import { StaggerIn } from '../components/StaggerIn';
 import { DIMENSIONS, EDGE_GAP } from '../data/content';
@@ -41,7 +44,7 @@ function DimRow({ index, label, value, fromValue }: { index: number; label: stri
   );
 }
 
-function ZoneContent() {
+function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
   const t = useTheme();
   const { state } = useStore();
   const { width } = useWindowDimensions();
@@ -64,8 +67,17 @@ function ZoneContent() {
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <StaggerIn index={0}>
+      <StaggerIn index={0} style={styles.header}>
         <AppText variant="display">Your zone</AppText>
+        <PressableScale
+          onPress={onOpenAccount}
+          scaleTo={0.9}
+          accessibilityRole="button"
+          accessibilityLabel="Account"
+          style={[styles.accountBtn, { backgroundColor: t.surface, borderColor: t.line }]}
+        >
+          <Icon name="account" size={19} color={t.ink} />
+        </PressableScale>
       </StaggerIn>
       <StaggerIn index={1} style={{ marginTop: 8 }}>
         <RadarChart from={from} to={state.zone} focus={state.today?.dim} width={width - 44} delay={150} />
@@ -97,15 +109,19 @@ function ZoneContent() {
 export function ZoneScreen(_props: BottomTabScreenProps<TabParamList, 'Zone'>) {
   const t = useTheme();
   const replay = useReplayKey();
+  const [account, setAccount] = useState(false);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ZoneContent key={replay} />
+      <ZoneContent key={replay} onOpenAccount={() => setAccount(true)} />
+      <AccountSheet visible={account} onClose={() => setAccount(false)} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 32 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  accountBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14, marginBottom: 22 },
   xpTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden' },
   xpFill: { height: 8, borderRadius: 4 },

@@ -8,7 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
-export type IconName = 'back' | 'close' | 'plus' | 'sunrise' | 'rings' | 'journal' | 'check' | 'flame';
+export type IconName = 'back' | 'close' | 'plus' | 'sunrise' | 'rings' | 'journal' | 'check' | 'flame' | 'account';
 
 type Props = { name: IconName; size?: number; color: string; strokeWidth?: number };
 
@@ -40,6 +40,12 @@ export function Icon({ name, size = 20, color, strokeWidth = 2.2 }: Props) {
           d="M12 2c1 4 6 6 6 11.5a6 6 0 0 1-12 0c0-2.4 1.1-3.8 2.3-5 .3 1.7 1 2.4 2.1 2.6C10 8.6 10.4 5 12 2z"
           fill={color}
         />
+      )}
+      {name === 'account' && (
+        <>
+          <Circle cx="12" cy="8.5" r="3.3" {...stroke} />
+          <Path d="M4.8 19.5c1.2-3.3 4-5 7.2-5s6 1.7 7.2 5" {...stroke} />
+        </>
       )}
     </Svg>
   );
