@@ -7,6 +7,7 @@ import { useFonts } from 'expo-font';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { AuthProvider } from './src/state/auth';
 import { StoreProvider } from './src/state/store';
 import { ThemeProvider } from './src/theme/ThemeProvider';
 
@@ -23,9 +24,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <StoreProvider>
-          <RootNavigator />
-        </StoreProvider>
+        <AuthProvider>
+          <StoreProvider>
+            <RootNavigator />
+          </StoreProvider>
+        </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

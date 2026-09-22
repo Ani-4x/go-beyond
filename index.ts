@@ -1,3 +1,8 @@
+// Supabase's JS client expects a browser-style URL global, which React Native
+// doesn't have. Must be the very first import, before anything that touches
+// networking (including Supabase itself) runs.
+import 'react-native-url-polyfill/auto';
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

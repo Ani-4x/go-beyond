@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
+import * as Crypto from 'expo-crypto';
 import {
   CHALLENGES,
   DIMENSIONS,
@@ -11,6 +11,8 @@ import {
   XP,
 } from '../data/content';
 import { dayKey, yesterdayKey } from '../lib/date';
+import { EntryRow, ProfileRow, supabase } from '../lib/supabase';
+import { useAuth } from './auth';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -50,11 +52,11 @@ export type Persisted = {
 
 export type State = Persisted & { ready: boolean };
 
-const STORAGE_KEY = 'gobeyond:v1';
+const DEFAULT_ZONE = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
 
 const EMPTY: Persisted = {
   onboarded: false,
-  zone: [0.3, 0.3, 0.3, 0.3, 0.3, 0.3],
+  zone: DEFAULT_ZONE,
   xp: 0,
   streak: 0,
   lastCompleted: null,
@@ -99,26 +101,53 @@ export function previewCompletion(state: Pick<State, 'zone' | 'today'>) {
   return { dim: t.dim, level, from: state.zone, to, xpGain: XP[level] };
 }
 
-const makeId = (now: number) => `${now}-${Math.random().toString(36).slice(2, 7)}`;
+const computeCompletedDays = (entries: Entry[]): string[] => [
+  ...new Set(entries.filter((e) => e.type === 'challenge').map((e) => dayKey(e.ts))),
+];
+
+function fromRows(profile: ProfileRow | null, entryRows: EntryRow[]): Persisted {
+  const entries: Entry[] = entryRows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    tag: r.tag,
+    feel: r.feel ?? undefined,
+    ts: new Date(r.created_at).getTime(),
+  }));
+  return {
+    onboarded: profile?.onboarded ?? false,
+    zone: profile?.zone && profile.zone.length === 6 ? profile.zone : DEFAULT_ZONE,
+    xp: profile?.xp ?? 0,
+    streak: profile?.streak ?? 0,
+    lastCompleted: profile?.last_completed ?? null,
+    completedDays: computeCompletedDays(entries),
+    today: (profile?.today as TodayChallenge | null) ?? null,
+    entries,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Reducer                                                             */
 /* ------------------------------------------------------------------ */
 
 type Action =
-  | { type: 'hydrate'; data: Persisted | null }
+  | { type: 'hydrate'; data: Persisted }
+  | { type: 'signedOut' }
   | { type: 'finishBaseline'; zone: number[] }
   | { type: 'completeOnboarding' }
   | { type: 'ensureToday'; now: number }
   | { type: 'setShrunk'; shrunk: boolean }
-  | { type: 'complete'; feel?: string; now: number }
-  | { type: 'addMoment'; title: string; tag: string; feel?: string; now: number }
+  | { type: 'complete'; id: string; feel?: string; now: number }
+  | { type: 'addMoment'; id: string; title: string; tag: string; feel?: string; now: number }
   | { type: 'reset' };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'hydrate':
-      return { ...EMPTY, ...(action.data ?? {}), ready: true };
+      return { ...action.data, ready: true };
+
+    case 'signedOut':
+      return { ...EMPTY, ready: false };
 
     case 'finishBaseline':
       return { ...state, zone: action.zone };
@@ -152,7 +181,7 @@ function reducer(state: State, action: Action): State {
             ? state.streak + 1
             : 1;
       const entry: Entry = {
-        id: makeId(action.now),
+        id: action.id,
         type: 'challenge',
         title: CHALLENGES[t.dim][level].done,
         tag: DIMENSIONS[t.dim],
@@ -173,7 +202,7 @@ function reducer(state: State, action: Action): State {
 
     case 'addMoment': {
       const entry: Entry = {
-        id: makeId(action.now),
+        id: action.id,
         type: 'moment',
         title: action.title,
         tag: action.tag,
@@ -186,6 +215,55 @@ function reducer(state: State, action: Action): State {
     case 'reset':
       return { ...EMPTY, ready: true };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Supabase sync                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Retries a fire-and-forget write a few times with backoff, then gives up quietly. */
+function withRetry(
+  label: string,
+  attempt: () => PromiseLike<{ error: { message: string } | null }>,
+  tries = 3,
+  delay = 2000,
+) {
+  attempt().then(({ error }) => {
+    if (!error) return;
+    if (tries <= 1) {
+      console.warn(`[go-beyond] ${label} failed permanently:`, error.message);
+      return;
+    }
+    setTimeout(() => withRetry(label, attempt, tries - 1, delay * 2), delay);
+  });
+}
+
+async function fetchProfile(userId: string): Promise<ProfileRow | null> {
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  if (data) return data as ProfileRow;
+
+  // The database trigger normally creates this row at sign-up. If it hasn't landed yet
+  // (a brand-new account, checked a beat too soon), create it here so the app isn't stuck.
+  const fallback = { id: userId, zone: DEFAULT_ZONE, xp: 0, streak: 0, last_completed: null, today: null, onboarded: false };
+  const { data: inserted, error: insertError } = await supabase
+    .from('profiles')
+    .upsert(fallback, { onConflict: 'id' })
+    .select('*')
+    .single();
+  if (insertError) throw insertError;
+  return inserted as ProfileRow;
+}
+
+async function fetchEntries(userId: string): Promise<EntryRow[]> {
+  const { data, error } = await supabase
+    .from('entries')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  return (data ?? []) as EntryRow[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -206,30 +284,73 @@ type Store = {
 const StoreContext = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
+  const { userId } = useAuth();
   const [state, dispatch] = useReducer(reducer, { ...EMPTY, ready: false });
 
-  // Load once.
-  useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        let data: Persisted | null = null;
-        try {
-          const parsed = raw ? (JSON.parse(raw) as Persisted) : null;
-          if (parsed && Array.isArray(parsed.zone) && parsed.zone.length === 6) data = parsed;
-        } catch {
-          data = null;
-        }
-        dispatch({ type: 'hydrate', data });
-      })
-      .catch(() => dispatch({ type: 'hydrate', data: null }));
-  }, []);
+  // IDs already written to (or read from) Supabase, so the sync effect below never re-inserts them.
+  const syncedEntryIds = useRef<Set<string>>(new Set());
+  // Guards against a slow fetch from a previous user landing after a new one has signed in.
+  const requestId = useRef(0);
 
-  // Save on every change after the first load.
+  // Fetch this user's data on sign-in, and clear local state on sign-out.
   useEffect(() => {
-    if (!state.ready) return;
-    const { ready: _ready, ...persisted } = state;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(persisted)).catch(() => {});
-  }, [state]);
+    if (!userId) {
+      syncedEntryIds.current = new Set();
+      dispatch({ type: 'signedOut' });
+      return;
+    }
+    const id = ++requestId.current;
+    (async () => {
+      try {
+        const [profile, entryRows] = await Promise.all([fetchProfile(userId), fetchEntries(userId)]);
+        if (id !== requestId.current) return; // a newer request has since started
+        syncedEntryIds.current = new Set(entryRows.map((r) => r.id));
+        dispatch({ type: 'hydrate', data: fromRows(profile, entryRows) });
+      } catch (e) {
+        console.warn('[go-beyond] failed to load your data:', e instanceof Error ? e.message : e);
+      }
+    })();
+  }, [userId]);
+
+  // Whenever the profile-level fields change, write them back. Runs once right after the
+  // initial fetch too (writing back what was just read), which is a harmless no-op.
+  useEffect(() => {
+    if (!state.ready || !userId) return;
+    withRetry('save profile', () =>
+      supabase
+        .from('profiles')
+        .update({
+          zone: state.zone,
+          xp: state.xp,
+          streak: state.streak,
+          last_completed: state.lastCompleted,
+          today: state.today,
+          onboarded: state.onboarded,
+        })
+        .eq('id', userId),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.ready, userId, state.zone, state.xp, state.streak, state.lastCompleted, state.today, state.onboarded]);
+
+  // Insert any journal entries that haven't made it to Supabase yet.
+  useEffect(() => {
+    if (!state.ready || !userId) return;
+    for (const e of state.entries) {
+      if (syncedEntryIds.current.has(e.id)) continue;
+      syncedEntryIds.current.add(e.id);
+      withRetry('save entry', () =>
+        supabase.from('entries').insert({
+          id: e.id,
+          user_id: userId,
+          type: e.type,
+          title: e.title,
+          tag: e.tag,
+          feel: e.feel ?? null,
+          created_at: new Date(e.ts).toISOString(),
+        }),
+      );
+    }
+  }, [state.ready, userId, state.entries]);
 
   const finishBaseline = useCallback(
     (answers: number[]) => dispatch({ type: 'finishBaseline', zone: scoreBaseline(answers) }),
@@ -238,12 +359,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const completeOnboarding = useCallback(() => dispatch({ type: 'completeOnboarding' }), []);
   const ensureToday = useCallback(() => dispatch({ type: 'ensureToday', now: Date.now() }), []);
   const setShrunk = useCallback((shrunk: boolean) => dispatch({ type: 'setShrunk', shrunk }), []);
-  const complete = useCallback((feel?: string) => dispatch({ type: 'complete', feel, now: Date.now() }), []);
-  const addMoment = useCallback(
-    (m: { title: string; tag: string; feel?: string }) => dispatch({ type: 'addMoment', ...m, now: Date.now() }),
+  const complete = useCallback(
+    (feel?: string) => dispatch({ type: 'complete', id: Crypto.randomUUID(), feel, now: Date.now() }),
     [],
   );
-  const resetAll = useCallback(() => dispatch({ type: 'reset' }), []);
+  const addMoment = useCallback(
+    (m: { title: string; tag: string; feel?: string }) =>
+      dispatch({ type: 'addMoment', id: Crypto.randomUUID(), ...m, now: Date.now() }),
+    [],
+  );
+  const resetAll = useCallback(() => {
+    if (userId) {
+      syncedEntryIds.current = new Set();
+      supabase
+        .from('entries')
+        .delete()
+        .eq('user_id', userId)
+        .then(({ error }) => error && console.warn('[go-beyond] reset (entries) failed:', error.message));
+      supabase
+        .from('profiles')
+        .update({ zone: DEFAULT_ZONE, xp: 0, streak: 0, last_completed: null, today: null, onboarded: false })
+        .eq('id', userId)
+        .then(({ error }) => error && console.warn('[go-beyond] reset (profile) failed:', error.message));
+    }
+    dispatch({ type: 'reset' });
+  }, [userId]);
 
   const value = useMemo<Store>(
     () => ({ state, finishBaseline, completeOnboarding, ensureToday, setShrunk, complete, addMoment, resetAll }),
