@@ -1,5 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -17,6 +18,7 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
 import { Button } from '../components/Button';
+import { GlowField } from '../components/GlowField';
 import { DrawCheck, Icon } from '../components/Icons';
 import { RadarChart } from '../components/RadarChart';
 import { Ripples } from '../components/Ripples';
@@ -28,7 +30,7 @@ import type { TabParamList, TabScreenNav } from '../navigation/types';
 import { useStore, useToday, weakestDim } from '../state/store';
 import { ease, spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { fonts, radius } from '../theme/tokens';
+import { brand, fonts, glowElevation, gradients, radius, surfaceElevation } from '../theme/tokens';
 
 /* ---------------------------- pieces ---------------------------- */
 
@@ -53,7 +55,7 @@ function StreakChip({ streak }: { streak: number }) {
   const chipStyle = useAnimatedStyle(() => ({ transform: [{ scale: bump.value }] }));
 
   return (
-    <Animated.View style={[styles.streak, { backgroundColor: t.surface, borderColor: t.line }, chipStyle]}>
+    <Animated.View style={[styles.streak, surfaceElevation(t), chipStyle]}>
       <Animated.View style={flameStyle}>
         <Icon name="flame" size={15} color={t.ember} />
       </Animated.View>
@@ -146,32 +148,36 @@ function TodayContent() {
 
       {!today.done ? (
         <StaggerIn index={1}>
-          <View style={[styles.hero, { backgroundColor: t.cobalt }]}>
-            <Ripples size={220} style={{ right: -70, top: -70 }} />
-            <View style={styles.heroTop}>
-              <View style={styles.pill}>
-                <AppText variant="label" color="#fff" style={{ fontSize: 13 }}>{dimLabel}</AppText>
+          <View style={styles.heroShadow}>
+            <View style={styles.hero}>
+              <LinearGradient colors={gradients.cobalt} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+              <GlowField color="#B7A9FF" size={240} opacity={0.5} style={styles.heroGlow} />
+              <Ripples size={220} style={{ right: -70, top: -70 }} />
+              <View style={styles.heroTop}>
+                <View style={styles.pill}>
+                  <AppText variant="label" color="#fff" style={{ fontSize: 13 }}>{dimLabel}</AppText>
+                </View>
+                <Difficulty level={level} />
               </View>
-              <Difficulty level={level} />
+              <Animated.View key={challenge.text} entering={FadeInDown.duration(380).easing(ease)}>
+                <AppText variant="hero" color="#fff">{challenge.text}</AppText>
+                <AppText variant="small" color="rgba(255,255,255,0.85)" style={{ marginTop: 14, marginBottom: 22 }}>{meta}</AppText>
+              </Animated.View>
+              <Button label="Start challenge" onPress={() => nav.navigate('Focus')} />
+              {canResize && (
+                <Button
+                  variant="ghost"
+                  color="#fff"
+                  label={today.shrunk ? 'Make it bigger' : 'Make it smaller'}
+                  onPress={() => setShrunk(!today.shrunk)}
+                />
+              )}
             </View>
-            <Animated.View key={challenge.text} entering={FadeInDown.duration(380).easing(ease)}>
-              <AppText variant="hero" color="#fff">{challenge.text}</AppText>
-              <AppText variant="small" color="rgba(255,255,255,0.85)" style={{ marginTop: 14, marginBottom: 22 }}>{meta}</AppText>
-            </Animated.View>
-            <Button label="Start challenge" onPress={() => nav.navigate('Focus')} />
-            {canResize && (
-              <Button
-                variant="ghost"
-                color="#fff"
-                label={today.shrunk ? 'Make it bigger' : 'Make it smaller'}
-                onPress={() => setShrunk(!today.shrunk)}
-              />
-            )}
           </View>
         </StaggerIn>
       ) : (
         <StaggerIn index={1}>
-          <View style={[styles.doneCard, { backgroundColor: t.tint }]}>
+          <View style={[styles.doneCard, { backgroundColor: t.tint }, t.scheme === 'dark' ? styles.doneCardDark : styles.doneCardLight]}>
             <Animated.View entering={ZoomIn.delay(150).springify()} style={[styles.tick, { backgroundColor: t.cobalt }]}>
               <DrawCheck size={22} color="#fff" delay={450} />
             </Animated.View>
@@ -185,7 +191,7 @@ function TodayContent() {
       )}
 
       <StaggerIn index={2}>
-        <View style={[styles.card, styles.why, { backgroundColor: t.surface, borderColor: t.line }]}>
+        <View style={[styles.card, styles.why, surfaceElevation(t)]}>
           <RadarChart from={ZERO_ZONE} to={state.zone} focus={today.dim} width={84} labels={false} delay={350} />
           <AppText variant="small" muted style={{ flex: 1 }}>
             {today.done ? (
@@ -205,7 +211,7 @@ function TodayContent() {
       </StaggerIn>
 
       <StaggerIn index={3}>
-        <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.line }]}>
+        <View style={[styles.card, surfaceElevation(t)]}>
           <AppText variant="label" muted style={{ marginBottom: 12 }}>This week</AppText>
           <View style={styles.days}>
             {weekDays().map((d) => {
@@ -232,17 +238,28 @@ export function TodayScreen(_props: BottomTabScreenProps<TabParamList, 'Today'>)
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 32, gap: 14 },
+  scroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 150, gap: 14 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  streak: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1.5 },
-  hero: { borderRadius: radius.xl, padding: 22, paddingBottom: 14, overflow: 'hidden' },
+  streak: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill },
+  heroShadow: { borderRadius: radius.xl, ...glowElevation(brand.cobalt, 0.34) },
+  hero: { borderRadius: radius.xl, padding: 22, paddingBottom: 14, overflow: 'hidden', backgroundColor: brand.cobalt },
+  heroGlow: { position: 'absolute', right: -70, top: -90 },
   heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
-  pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.18)' },
+  pill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
   diff: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pip: { width: 8, height: 8, borderRadius: 4 },
   doneCard: { borderRadius: radius.xl, padding: 24 },
+  doneCardLight: { shadowColor: '#141935', shadowOpacity: 0.07, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 2 },
+  doneCardDark: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
   tick: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  card: { borderRadius: radius.lg, borderWidth: 1.5, padding: 16 },
+  card: { borderRadius: radius.lg, padding: 16 },
   why: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   strong: { fontFamily: fonts.semibold },
   days: { flexDirection: 'row', justifyContent: 'space-between' },

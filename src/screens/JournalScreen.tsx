@@ -23,6 +23,7 @@ import { PressableScale } from '../components/PressableScale';
 import { Segmented } from '../components/Segmented';
 import { StaggerIn } from '../components/StaggerIn';
 import { dayLabel, formatTime } from '../lib/date';
+import { brand, glowElevation } from '../theme/tokens';
 import { useReplayKey } from '../lib/hooks';
 import type { TabParamList } from '../navigation/types';
 import { Entry, useStore } from '../state/store';
@@ -201,10 +202,10 @@ export function JournalScreen({ route, navigation }: BottomTabScreenProps<TabPar
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 110 },
+  scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 160 },
   entry: { flexDirection: 'row', gap: 14, paddingVertical: 14, borderTopWidth: 1.5 },
   mark: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   meta: { flexDirection: 'row', gap: 12, marginTop: 3 },
-  fabWrap: { position: 'absolute', right: 20, bottom: 18 },
+  fabWrap: { position: 'absolute', right: 20, bottom: 96, borderRadius: 26, ...glowElevation(brand.ember, 0.45) },
   fab: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 52, paddingLeft: 16, paddingRight: 20, borderRadius: 26 },
 });

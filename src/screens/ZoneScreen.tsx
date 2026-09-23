@@ -1,10 +1,12 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AccountSheet } from '../components/AccountSheet';
 import { AppText } from '../components/AppText';
+import { GlowField } from '../components/GlowField';
 import { Icon } from '../components/Icons';
 import { Legend } from '../components/Legend';
 import { PressableScale } from '../components/PressableScale';
@@ -16,6 +18,7 @@ import type { TabParamList } from '../navigation/types';
 import { useStore } from '../state/store';
 import { ease } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
+import { gradients, surfaceElevation } from '../theme/tokens';
 
 /** Remembered between visits so the chart can animate from where it was last time. */
 let lastZone: number[] | null = null;
@@ -38,7 +41,9 @@ function DimRow({ index, label, value, fromValue }: { index: number; label: stri
       </View>
       <View style={[styles.track, { backgroundColor: t.line }]}>
         <Animated.View style={[styles.bar, { backgroundColor: t.ember, opacity: 0.35 }, edge]} />
-        <Animated.View style={[styles.bar, { backgroundColor: t.accent }, zone]} />
+        <Animated.View style={[styles.bar, styles.barGradient, zone]}>
+          <LinearGradient colors={gradients.cobalt} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+        </Animated.View>
       </View>
     </Animated.View>
   );
@@ -67,6 +72,13 @@ function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/* Sized and faded well past the visible area on every side, so nothing ever hard-clips it. */}
+      <GlowField
+        color={t.accent}
+        size={480}
+        opacity={0.38}
+        style={[styles.ambientGlow, { left: width / 2 - 240 }]}
+      />
       <StaggerIn index={0} style={styles.header}>
         <AppText variant="display">Your zone</AppText>
         <PressableScale
@@ -74,7 +86,7 @@ function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
           scaleTo={0.9}
           accessibilityRole="button"
           accessibilityLabel="Account"
-          style={[styles.accountBtn, { backgroundColor: t.surface, borderColor: t.line }]}
+          style={[styles.accountBtn, surfaceElevation(t)]}
         >
           <Icon name="account" size={19} color={t.ink} />
         </PressableScale>
@@ -93,7 +105,9 @@ function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
       <StaggerIn index={2} style={styles.xpRow}>
         <AppText variant="title" style={{ fontSize: 20 }}>Level {level}</AppText>
         <View style={[styles.xpTrack, { backgroundColor: t.line }]}>
-          <Animated.View style={[styles.xpFill, { backgroundColor: t.accent }, xpStyle]} />
+          <Animated.View style={[styles.xpFill, xpStyle]}>
+            <LinearGradient colors={gradients.cobalt} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+          </Animated.View>
         </View>
         <AppText variant="caption" muted>{state.xp % 100} / 100 XP</AppText>
       </StaggerIn>
@@ -119,14 +133,16 @@ export function ZoneScreen(_props: BottomTabScreenProps<TabParamList, 'Zone'>) {
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 32 },
+  scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 150 },
+  ambientGlow: { position: 'absolute', top: -30 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  accountBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  accountBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14, marginBottom: 22 },
   xpTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden' },
-  xpFill: { height: 8, borderRadius: 4 },
+  xpFill: { height: 8, borderRadius: 4, overflow: 'hidden' },
   dim: { paddingVertical: 12, borderTopWidth: 1.5 },
   dimHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },
   bar: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 4 },
+  barGradient: { overflow: 'hidden' },
 });

@@ -11,7 +11,7 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 import { FEELINGS, MOMENT_CATEGORIES } from '../data/content';
 import { useTheme } from '../theme/ThemeProvider';
-import { fonts } from '../theme/tokens';
+import { fonts, glowElevation } from '../theme/tokens';
 import { AppText } from './AppText';
 import { Button } from './Button';
 import { Chip } from './Chip';
@@ -35,7 +35,11 @@ function CategoryCard({ label, hint, selected, onPress }: { label: string; hint:
         onPress={onPress}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        style={[styles.card, { borderColor: selected ? t.accent : t.line, backgroundColor: selected ? t.tint : t.bg }]}
+        style={[
+          styles.card,
+          { borderColor: selected ? t.accent : t.line, backgroundColor: selected ? t.tint : t.bg },
+          selected ? glowElevation(t.accent, 0.14) : null,
+        ]}
       >
         <AppText variant="label" style={{ fontSize: 15 }}>{label}</AppText>
         <AppText variant="caption" muted style={{ fontFamily: fonts.body }}>{hint}</AppText>
