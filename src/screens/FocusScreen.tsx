@@ -13,14 +13,14 @@ import { PressableScale } from '../components/PressableScale';
 import { Ripples } from '../components/Ripples';
 import { StaggerIn } from '../components/StaggerIn';
 import type { RootStackParamList } from '../navigation/types';
-import { useToday } from '../state/store';
+import { useQuestItem } from '../state/store';
 import { ease } from '../theme/motion';
 import { gradients } from '../theme/tokens';
 
 /** Act: a calm focus mode. No timer, no pressure. */
-export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Focus'>) {
-  const info = useToday();
-  if (!info) return null;
+export function FocusScreen({ navigation, route }: NativeStackScreenProps<RootStackParamList, 'Focus'>) {
+  const item = useQuestItem(route.params.itemId);
+  if (!item) return null;
 
   return (
     <View style={styles.root}>
@@ -38,10 +38,10 @@ export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackPara
           </StaggerIn>
 
           <StaggerIn index={1}>
-            <AppText variant="display" color="#fff" style={styles.title}>{info.challenge.text}</AppText>
+            <AppText variant="display" color="#fff" style={styles.title}>{item.challenge.text}</AppText>
           </StaggerIn>
 
-          {info.tips.map((tip, i) => (
+          {item.tips.map((tip: string, i: number) => (
             <Animated.View key={tip} entering={FadeInDown.delay(500 + i * 120).duration(500).easing(ease)} style={styles.tip}>
               <AppText variant="medium" color="#fff" style={{ fontSize: 15.5 }}>{tip}</AppText>
             </Animated.View>
@@ -53,7 +53,7 @@ export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackPara
         </View>
 
         <Animated.View entering={FadeInDown.delay(350).duration(500).easing(ease)} style={styles.dock}>
-          <Button variant="light" label="I did it" onPress={() => navigation.replace('Complete')} />
+          <Button variant="light" label="I did it" onPress={() => navigation.replace('Complete', { itemId: item.id })} />
           <Button variant="ghost" color="#fff" label="Not today" onPress={() => navigation.goBack()} />
         </Animated.View>
       </SafeAreaView>

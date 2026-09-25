@@ -1,7 +1,9 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
-import { LayoutChangeEvent, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, LayoutChangeEvent, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
+  Easing,
   FadeInDown,
   FadeOut,
   LinearTransition,
@@ -9,34 +11,35 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSequence,
   withSpring,
   withTiming,
-  Easing,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
+import { Button } from '../components/Button';
 import { CaptureSheet } from '../components/CaptureSheet';
+import { Chip } from '../components/Chip';
 import { Confetti } from '../components/Confetti';
 import { Icon } from '../components/Icons';
 import { PressableScale } from '../components/PressableScale';
-import { Segmented } from '../components/Segmented';
 import { StaggerIn } from '../components/StaggerIn';
+import { styleForEntry } from '../data/content';
 import { dayLabel, formatTime } from '../lib/date';
-import { brand, glowElevation } from '../theme/tokens';
 import { useReplayKey } from '../lib/hooks';
 import type { TabParamList } from '../navigation/types';
 import { Entry, useStore } from '../state/store';
 import { ease, spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
+import { surfaceElevation, fonts } from '../theme/tokens';
 
 type Filter = 'all' | 'challenge' | 'moment';
 
 /** Entries the journal has already shown. New ones get a small highlight. */
 let seenIds: Set<string> | null = null;
 
-function EntryRow({ entry, order, fresh }: { entry: Entry; order: number; fresh: boolean }) {
+function EntryRow({ entry, order, fresh, onDelete }: { entry: Entry; order: number; fresh: boolean; onDelete: () => void }) {
   const t = useTheme();
+  const style = styleForEntry(entry.type, entry.tag);
   const ring = useSharedValue(0);
   useEffect(() => {
     if (fresh) ring.value = withDelay(250, withTiming(1, { duration: 1100, easing: Easing.out(Easing.quad) }));
@@ -52,13 +55,9 @@ function EntryRow({ entry, order, fresh }: { entry: Entry; order: number; fresh:
       style={[styles.entry, { borderTopColor: t.line }]}
     >
       <View style={{ marginTop: 1 }}>
-        {entry.type === 'challenge' ? (
-          <View style={[styles.mark, { backgroundColor: t.cobalt }]}>
-            <Icon name="check" size={13} color="#fff" strokeWidth={3} />
-          </View>
-        ) : (
-          <View style={[styles.mark, { borderWidth: 2, borderColor: t.line }]} />
-        )}
+        <View style={[styles.mark, { backgroundColor: style.color + '24' }]}>
+          <Icon name={style.icon} size={16} color={style.color} />
+        </View>
         {fresh && (
           <Animated.View pointerEvents="none" style={[styles.mark, StyleSheet.absoluteFill, { borderWidth: 2, borderColor: t.ember }, ringStyle]} />
         )}
@@ -71,12 +70,21 @@ function EntryRow({ entry, order, fresh }: { entry: Entry; order: number; fresh:
           ))}
         </View>
       </View>
+      <PressableScale
+        onPress={onDelete}
+        scaleTo={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="More options"
+        style={styles.dots}
+      >
+        <Icon name="dots" size={16} color={t.muted} />
+      </PressableScale>
     </Animated.View>
   );
 }
 
-function JournalContent() {
-  const { state } = useStore();
+function JournalContent({ query }: { query: string }) {
+  const { state, deleteEntry } = useStore();
   const [filter, setFilter] = useState<Filter>('all');
 
   // Decide once per mount which entries are new since the last visit.
@@ -92,9 +100,11 @@ function JournalContent() {
   });
 
   const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
     const out: { label: string; items: Entry[] }[] = [];
     state.entries
       .filter((e) => filter === 'all' || e.type === filter)
+      .filter((e) => !q || e.title.toLowerCase().includes(q) || e.tag.toLowerCase().includes(q))
       .forEach((e) => {
         const label = dayLabel(e.ts);
         const g = out.find((x) => x.label === label);
@@ -102,34 +112,34 @@ function JournalContent() {
         else out.push({ label, items: [e] });
       });
     return out;
-  }, [state.entries, filter]);
+  }, [state.entries, filter, query]);
+
+  const confirmDelete = (entry: Entry) => {
+    Alert.alert('Delete this entry?', entry.title, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteEntry(entry.id) },
+    ]);
+  };
 
   let order = 0;
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <StaggerIn index={0}>
-        <AppText variant="display">Journal</AppText>
-      </StaggerIn>
-      <StaggerIn index={1} style={{ marginTop: 16 }}>
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: 'All' },
-            { value: 'challenge', label: 'Challenges' },
-            { value: 'moment', label: 'Moments' },
-          ]}
-        />
+    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <StaggerIn index={1} style={{ marginTop: 16, flexDirection: 'row', gap: 8 }}>
+        <Chip label="All" selected={filter === 'all'} onPress={() => setFilter('all')} />
+        <Chip label="Challenges" selected={filter === 'challenge'} onPress={() => setFilter('challenge')} />
+        <Chip label="Moments" selected={filter === 'moment'} onPress={() => setFilter('moment')} />
       </StaggerIn>
 
       {groups.length === 0 ? (
-        <AppText muted style={{ marginTop: 26 }}>Nothing here yet. Add a moment to start your journal.</AppText>
+        <AppText muted style={{ marginTop: 26 }}>
+          {query ? 'Nothing matches that search.' : 'Nothing here yet. Add a moment to start your journal.'}
+        </AppText>
       ) : (
         groups.map((g) => (
           <Animated.View key={g.label} layout={LinearTransition.springify().damping(18)} style={{ marginTop: 22 }}>
             <AppText variant="label" muted>{g.label}</AppText>
             {g.items.map((e) => (
-              <EntryRow key={e.id} entry={e} order={order++} fresh={fresh.has(e.id)} />
+              <EntryRow key={e.id} entry={e} order={order++} fresh={fresh.has(e.id)} onDelete={() => confirmDelete(e)} />
             ))}
           </Animated.View>
         ))
@@ -146,6 +156,8 @@ export function JournalScreen({ route, navigation }: BottomTabScreenProps<TabPar
   const [sheet, setSheet] = useState(false);
   const [burst, setBurst] = useState(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState('');
 
   // "Add a moment" on the Today card opens the sheet here.
   const openCapture = route.params?.openCapture;
@@ -156,33 +168,50 @@ export function JournalScreen({ route, navigation }: BottomTabScreenProps<TabPar
     }
   }, [openCapture, navigation]);
 
-  const rot = useSharedValue(0);
-  useEffect(() => {
-    rot.value = withSpring(sheet ? 135 : 0, spring.bouncy);
-  }, [sheet, rot]);
-  const plus = useAnimatedStyle(() => ({ transform: [{ rotate: `${rot.value}deg` }] }));
-
   const onLayout = (e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ flex: 1 }} onLayout={onLayout}>
-        <JournalContent key={replay} />
-
-        <Animated.View entering={ZoomIn.delay(500).springify()} style={styles.fabWrap}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            {searching ? (
+              <Animated.View entering={FadeInDown.duration(220)}>
+                <TextInput
+                  autoFocus
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search your journal"
+                  placeholderTextColor={t.muted}
+                  style={[styles.searchInput, { color: t.ink }]}
+                />
+              </Animated.View>
+            ) : (
+              <>
+                <AppText variant="display">Journal</AppText>
+                <AppText variant="small" muted style={{ marginTop: 2 }}>Small moments. A bigger you.</AppText>
+              </>
+            )}
+          </View>
           <PressableScale
-            haptic
-            scaleTo={0.93}
-            onPress={() => setSheet(true)}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              if (searching) setQuery('');
+              setSearching((s) => !s);
+            }}
+            scaleTo={0.9}
             accessibilityRole="button"
-            accessibilityLabel="Add moment"
-            style={[styles.fab, { backgroundColor: t.ember }]}
+            accessibilityLabel={searching ? 'Close search' : 'Search'}
+            style={[styles.searchBtn, surfaceElevation(t)]}
           >
-            <Animated.View style={plus}>
-              <Icon name="plus" color={t.onEmber} />
-            </Animated.View>
-            <AppText variant="label" color={t.onEmber} style={{ fontSize: 15 }}>Add moment</AppText>
+            <Icon name={searching ? 'close' : 'search'} size={18} color={t.ink} />
           </PressableScale>
+        </View>
+
+        <JournalContent key={replay} query={query} />
+
+        <Animated.View entering={ZoomIn.delay(500).springify()} style={styles.addWrap}>
+          <Button label="Add moment" onPress={() => setSheet(true)} />
         </Animated.View>
 
         <Confetti burstKey={burst} x={box.w / 2} y={box.h - 60} count={18} />
@@ -202,10 +231,13 @@ export function JournalScreen({ route, navigation }: BottomTabScreenProps<TabPar
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 30, paddingBottom: 160 },
-  entry: { flexDirection: 'row', gap: 14, paddingVertical: 14, borderTopWidth: 1.5 },
-  mark: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 22, paddingTop: 30 },
+  searchBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  searchInput: { fontFamily: fonts.semibold, fontSize: 26, paddingVertical: 4 },
+  scroll: { paddingHorizontal: 22, paddingBottom: 150 },
+  entry: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderTopWidth: 1.5 },
+  mark: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   meta: { flexDirection: 'row', gap: 12, marginTop: 3 },
-  fabWrap: { position: 'absolute', right: 20, bottom: 96, borderRadius: 26, ...glowElevation(brand.ember, 0.45) },
-  fab: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 52, paddingLeft: 16, paddingRight: 20, borderRadius: 26 },
+  dots: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
+  addWrap: { position: 'absolute', left: 20, right: 20, bottom: 96 },
 });

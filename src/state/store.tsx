@@ -25,28 +25,38 @@ export type Entry = {
   /** Dimension name for challenges, category for moments. */
   tag: string;
   feel?: string;
+  note?: string;
   ts: number;
 };
 
-export type TodayChallenge = {
-  date: string;
+export type QuestItem = {
+  id: string;
   dim: DimIndex;
-  /** The level the app picked from your edge. */
+  /** The level the app picked from your edge, fixed for the day. */
   level: Level;
-  /** "Make it smaller" drops one level. */
-  shrunk: boolean;
   done: boolean;
+  doneAt?: number;
+};
+
+export type TodayQuests = {
+  date: string;
+  /** Candidates not yet swiped on, weakest dimension first. */
+  pool: QuestItem[];
+  /** Candidates swiped right on — no cap, could be none or all of them. */
+  accepted: QuestItem[];
 };
 
 export type Persisted = {
   onboarded: boolean;
+  /** Editable display name; falls back to the email's local part when null. */
+  name: string | null;
   /** Comfort zone per dimension, 0..1. */
   zone: number[];
   xp: number;
   streak: number;
   lastCompleted: string | null;
   completedDays: string[];
-  today: TodayChallenge | null;
+  today: TodayQuests | null;
   entries: Entry[];
 };
 
@@ -56,6 +66,7 @@ const DEFAULT_ZONE = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
 
 const EMPTY: Persisted = {
   onboarded: false,
+  name: null,
   zone: DEFAULT_ZONE,
   xp: 0,
   streak: 0,
@@ -84,21 +95,26 @@ export function scoreBaseline(answers: number[]): number[] {
 
 export const levelFor = (zoneValue: number): Level => (zoneValue < 0.2 ? 1 : zoneValue < 0.5 ? 2 : 3);
 
-export const effectiveLevel = (t: TodayChallenge): Level =>
-  (t.shrunk ? Math.max(1, t.level - 1) : t.level) as Level;
-
+/** The single weakest dimension — used for the Zone screen's "next edge" preview. */
 export const weakestDim = (zone: number[], avoid?: number): DimIndex => {
   const order = zone.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
   const pick = order.find((o) => o.i !== avoid) ?? order[0];
   return pick.i as DimIndex;
 };
 
-export function previewCompletion(state: Pick<State, 'zone' | 'today'>) {
-  const t = state.today;
-  if (!t || t.done) return null;
-  const level = effectiveLevel(t);
-  const to = state.zone.map((v, i) => (i === t.dim ? Math.min(1, v + GAIN[level]) : v));
-  return { dim: t.dim, level, from: state.zone, to, xpGain: XP[level] };
+/** Every dimension, weakest first — the order candidates are offered in the swipe stack. */
+function allDimsByWeakness(zone: number[]): DimIndex[] {
+  return zone
+    .map((v, i) => ({ v, i }))
+    .sort((a, b) => a.v - b.v)
+    .map((o) => o.i as DimIndex);
+}
+
+export function previewCompletion(state: Pick<State, 'zone' | 'today'>, itemId: string) {
+  const item = state.today?.accepted.find((i) => i.id === itemId);
+  if (!item || item.done) return null;
+  const to = state.zone.map((v, i) => (i === item.dim ? Math.min(1, v + GAIN[item.level]) : v));
+  return { dim: item.dim, level: item.level, from: state.zone, to, xpGain: XP[item.level] };
 }
 
 const computeCompletedDays = (entries: Entry[]): string[] => [
@@ -112,16 +128,23 @@ function fromRows(profile: ProfileRow | null, entryRows: EntryRow[]): Persisted 
     title: r.title,
     tag: r.tag,
     feel: r.feel ?? undefined,
+    note: r.note ?? undefined,
     ts: new Date(r.created_at).getTime(),
   }));
+  const rawToday = profile?.today as TodayQuests | null | undefined;
+  // Defends against a `today` shape from an earlier version of the app (a single challenge, or
+  // a fixed 3-item checklist) — treat it as absent so ensureToday regenerates a proper one,
+  // rather than crashing on missing pool/accepted arrays.
+  const today = rawToday && Array.isArray(rawToday.pool) && Array.isArray(rawToday.accepted) ? rawToday : null;
   return {
     onboarded: profile?.onboarded ?? false,
+    name: profile?.name ?? null,
     zone: profile?.zone && profile.zone.length === 6 ? profile.zone : DEFAULT_ZONE,
     xp: profile?.xp ?? 0,
     streak: profile?.streak ?? 0,
     lastCompleted: profile?.last_completed ?? null,
     completedDays: computeCompletedDays(entries),
-    today: (profile?.today as TodayChallenge | null) ?? null,
+    today,
     entries,
   };
 }
@@ -135,10 +158,12 @@ type Action =
   | { type: 'signedOut' }
   | { type: 'finishBaseline'; zone: number[] }
   | { type: 'completeOnboarding' }
-  | { type: 'ensureToday'; now: number }
-  | { type: 'setShrunk'; shrunk: boolean }
-  | { type: 'complete'; id: string; feel?: string; now: number }
-  | { type: 'addMoment'; id: string; title: string; tag: string; feel?: string; now: number }
+  | { type: 'setName'; name: string | null }
+  | { type: 'ensureToday'; now: number; ids: string[] }
+  | { type: 'swipeCandidate'; id: string; accept: boolean }
+  | { type: 'completeItem'; itemId: string; entryId: string; feel?: string; now: number }
+  | { type: 'addMoment'; id: string; title: string; tag: string; feel?: string; note?: string; now: number }
+  | { type: 'deleteEntry'; id: string }
   | { type: 'reset' };
 
 function reducer(state: State, action: Action): State {
@@ -155,47 +180,64 @@ function reducer(state: State, action: Action): State {
     case 'completeOnboarding':
       return { ...state, onboarded: true };
 
+    case 'setName':
+      return { ...state, name: action.name };
+
     case 'ensureToday': {
       const key = dayKey(action.now);
       if (state.today && state.today.date === key) return state;
-      const dim = weakestDim(state.zone, state.today?.dim);
-      return {
-        ...state,
-        today: { date: key, dim, level: levelFor(state.zone[dim]), shrunk: false, done: false },
-      };
+      const dims = allDimsByWeakness(state.zone);
+      const pool: QuestItem[] = dims.map((dim, i) => ({
+        id: action.ids[i],
+        dim,
+        level: levelFor(state.zone[dim]),
+        done: false,
+      }));
+      return { ...state, today: { date: key, pool, accepted: [] } };
     }
 
-    case 'setShrunk':
-      return state.today ? { ...state, today: { ...state.today, shrunk: action.shrunk } } : state;
-
-    case 'complete': {
+    case 'swipeCandidate': {
       const t = state.today;
-      if (!t || t.done) return state;
-      const level = effectiveLevel(t);
+      const item = t?.pool.find((i) => i.id === action.id);
+      if (!t || !item) return state;
+      const pool = t.pool.filter((i) => i.id !== action.id);
+      const accepted = action.accept ? [...t.accepted, item] : t.accepted;
+      return { ...state, today: { ...t, pool, accepted } };
+    }
+
+    case 'completeItem': {
+      const t = state.today;
+      const item = t?.accepted.find((i) => i.id === action.itemId);
+      if (!t || !item || item.done) return state;
+      const zone = state.zone.map((v, i) => (i === item.dim ? Math.min(1, v + GAIN[item.level]) : v));
+      const accepted = t.accepted.map((i) => (i.id === item.id ? { ...i, done: true, doneAt: action.now } : i));
+      // A day only "counts" once at least one challenge was accepted and every accepted one is done.
+      const allDone = accepted.length > 0 && accepted.every((i) => i.done);
       const key = dayKey(action.now);
-      const zone = state.zone.map((v, i) => (i === t.dim ? Math.min(1, v + GAIN[level]) : v));
-      const streak =
-        state.lastCompleted === key
+      const streak = !allDone
+        ? state.streak
+        : state.lastCompleted === key
           ? state.streak
           : state.lastCompleted === yesterdayKey(action.now)
             ? state.streak + 1
             : 1;
       const entry: Entry = {
-        id: action.id,
+        id: action.entryId,
         type: 'challenge',
-        title: CHALLENGES[t.dim][level].done,
-        tag: DIMENSIONS[t.dim],
+        title: CHALLENGES[item.dim][item.level].done,
+        tag: DIMENSIONS[item.dim],
         feel: action.feel,
         ts: action.now,
       };
       return {
         ...state,
         zone,
-        xp: state.xp + XP[level],
+        xp: state.xp + XP[item.level],
         streak,
-        lastCompleted: key,
-        completedDays: state.completedDays.includes(key) ? state.completedDays : [...state.completedDays, key],
-        today: { ...t, done: true },
+        lastCompleted: allDone ? key : state.lastCompleted,
+        completedDays:
+          allDone && !state.completedDays.includes(key) ? [...state.completedDays, key] : state.completedDays,
+        today: { ...t, accepted },
         entries: [entry, ...state.entries],
       };
     }
@@ -207,9 +249,15 @@ function reducer(state: State, action: Action): State {
         title: action.title,
         tag: action.tag,
         feel: action.feel,
+        note: action.note,
         ts: action.now,
       };
       return { ...state, entries: [entry, ...state.entries] };
+    }
+
+    case 'deleteEntry': {
+      const entries = state.entries.filter((e) => e.id !== action.id);
+      return { ...state, entries, completedDays: computeCompletedDays(entries) };
     }
 
     case 'reset':
@@ -245,7 +293,7 @@ async function fetchProfile(userId: string): Promise<ProfileRow | null> {
 
   // The database trigger normally creates this row at sign-up. If it hasn't landed yet
   // (a brand-new account, checked a beat too soon), create it here so the app isn't stuck.
-  const fallback = { id: userId, zone: DEFAULT_ZONE, xp: 0, streak: 0, last_completed: null, today: null, onboarded: false };
+  const fallback = { id: userId, name: null, zone: DEFAULT_ZONE, xp: 0, streak: 0, last_completed: null, today: null, onboarded: false };
   const { data: inserted, error: insertError } = await supabase
     .from('profiles')
     .upsert(fallback, { onConflict: 'id' })
@@ -274,10 +322,12 @@ type Store = {
   state: State;
   finishBaseline: (answers: number[]) => void;
   completeOnboarding: () => void;
+  setName: (name: string) => void;
   ensureToday: () => void;
-  setShrunk: (shrunk: boolean) => void;
-  complete: (feel?: string) => void;
-  addMoment: (m: { title: string; tag: string; feel?: string }) => void;
+  swipeCandidate: (id: string, accept: boolean) => void;
+  completeItem: (itemId: string, feel?: string) => void;
+  addMoment: (m: { title: string; tag: string; feel?: string; note?: string }) => void;
+  deleteEntry: (id: string) => void;
   resetAll: () => void;
 };
 
@@ -320,6 +370,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       supabase
         .from('profiles')
         .update({
+          name: state.name,
           zone: state.zone,
           xp: state.xp,
           streak: state.streak,
@@ -330,7 +381,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.ready, userId, state.zone, state.xp, state.streak, state.lastCompleted, state.today, state.onboarded]);
+  }, [state.ready, userId, state.name, state.zone, state.xp, state.streak, state.lastCompleted, state.today, state.onboarded]);
 
   // Insert any journal entries that haven't made it to Supabase yet.
   useEffect(() => {
@@ -346,6 +397,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           title: e.title,
           tag: e.tag,
           feel: e.feel ?? null,
+          note: e.note ?? null,
           created_at: new Date(e.ts).toISOString(),
         }),
       );
@@ -357,16 +409,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [],
   );
   const completeOnboarding = useCallback(() => dispatch({ type: 'completeOnboarding' }), []);
-  const ensureToday = useCallback(() => dispatch({ type: 'ensureToday', now: Date.now() }), []);
-  const setShrunk = useCallback((shrunk: boolean) => dispatch({ type: 'setShrunk', shrunk }), []);
-  const complete = useCallback(
-    (feel?: string) => dispatch({ type: 'complete', id: Crypto.randomUUID(), feel, now: Date.now() }),
+  const setName = useCallback((name: string) => dispatch({ type: 'setName', name: name.trim() || null }), []);
+  const ensureToday = useCallback(() => {
+    const ids = Array.from({ length: DIMENSIONS.length }, () => Crypto.randomUUID());
+    dispatch({ type: 'ensureToday', now: Date.now(), ids });
+  }, []);
+  const swipeCandidate = useCallback(
+    (id: string, accept: boolean) => dispatch({ type: 'swipeCandidate', id, accept }),
+    [],
+  );
+  const completeItem = useCallback(
+    (itemId: string, feel?: string) =>
+      dispatch({ type: 'completeItem', itemId, entryId: Crypto.randomUUID(), feel, now: Date.now() }),
     [],
   );
   const addMoment = useCallback(
-    (m: { title: string; tag: string; feel?: string }) =>
+    (m: { title: string; tag: string; feel?: string; note?: string }) =>
       dispatch({ type: 'addMoment', id: Crypto.randomUUID(), ...m, now: Date.now() }),
     [],
+  );
+  const deleteEntry = useCallback(
+    (id: string) => {
+      dispatch({ type: 'deleteEntry', id });
+      syncedEntryIds.current.delete(id);
+      if (userId) {
+        withRetry('delete entry', () => supabase.from('entries').delete().eq('id', id).eq('user_id', userId));
+      }
+    },
+    [userId],
   );
   const resetAll = useCallback(() => {
     if (userId) {
@@ -386,8 +456,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   const value = useMemo<Store>(
-    () => ({ state, finishBaseline, completeOnboarding, ensureToday, setShrunk, complete, addMoment, resetAll }),
-    [state, finishBaseline, completeOnboarding, ensureToday, setShrunk, complete, addMoment, resetAll],
+    () => ({
+      state,
+      finishBaseline,
+      completeOnboarding,
+      setName,
+      ensureToday,
+      swipeCandidate,
+      completeItem,
+      addMoment,
+      deleteEntry,
+      resetAll,
+    }),
+    [
+      state,
+      finishBaseline,
+      completeOnboarding,
+      setName,
+      ensureToday,
+      swipeCandidate,
+      completeItem,
+      addMoment,
+      deleteEntry,
+      resetAll,
+    ],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
@@ -399,18 +491,30 @@ export function useStore(): Store {
   return ctx;
 }
 
-/** Today's challenge with everything a screen needs to render it. */
-export function useToday() {
+export type EnrichedItem = QuestItem & {
+  challenge: (typeof CHALLENGES)[DimIndex][Level];
+  dimLabel: string;
+  tips: [string, string, string];
+};
+
+function enrich(item: QuestItem): EnrichedItem {
+  return { ...item, challenge: CHALLENGES[item.dim][item.level], dimLabel: DIMENSIONS[item.dim], tips: TIPS[item.dim] };
+}
+
+/** Today's swipe pool and accepted checklist, enriched with actual challenge text. */
+export function useTodayQuests() {
   const { state } = useStore();
   const t = state.today;
   if (!t) return null;
-  const level = effectiveLevel(t);
-  return {
-    today: t,
-    level,
-    baseLevel: t.level,
-    challenge: CHALLENGES[t.dim][level],
-    dimLabel: DIMENSIONS[t.dim],
-    tips: TIPS[t.dim],
-  };
+  const pool = t.pool.map(enrich);
+  const accepted = t.accepted.map(enrich);
+  const completedCount = accepted.filter((i) => i.done).length;
+  return { quests: t, pool, accepted, completedCount, total: accepted.length };
+}
+
+/** One specific accepted item — what Focus and Complete need. */
+export function useQuestItem(itemId: string | undefined) {
+  const { state } = useStore();
+  const item = itemId ? state.today?.accepted.find((i) => i.id === itemId) : undefined;
+  return item ? enrich(item) : null;
 }

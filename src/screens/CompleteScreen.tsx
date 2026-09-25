@@ -20,11 +20,11 @@ import { useTheme } from '../theme/ThemeProvider';
 import { brand, radius } from '../theme/tokens';
 
 /** Reward: the edge visibly moves, then a single tap of reflection. */
-export function CompleteScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Complete'>) {
+export function CompleteScreen({ navigation, route }: NativeStackScreenProps<RootStackParamList, 'Complete'>) {
   const t = useTheme();
-  const { state, complete } = useStore();
+  const { state, completeItem } = useStore();
   const { width } = useWindowDimensions();
-  const [preview] = useState(() => previewCompletion(state)); // freeze before complete() changes state
+  const [preview] = useState(() => previewCompletion(state, route.params.itemId)); // freeze before completeItem() changes state
   const [feel, setFeel] = useState<string | null>(null);
   const [burst, setBurst] = useState(0);
 
@@ -42,8 +42,8 @@ export function CompleteScreen({ navigation }: NativeStackScreenProps<RootStackP
   const origin = radarPoint(preview.dim, Math.min(1, preview.to[preview.dim] + EDGE_GAP), chartWidth);
 
   const save = () => {
-    complete(feel ?? undefined);
-    navigation.popTo('Main', { screen: 'Zone' });
+    completeItem(route.params.itemId, feel ?? undefined);
+    navigation.popTo('Main', { screen: 'Today' });
   };
 
   return (

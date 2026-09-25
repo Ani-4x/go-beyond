@@ -23,6 +23,7 @@ export const supabase = createClient(url, anonKey, {
 /** Database row shapes, matching supabase/migrations/0001_init.sql. */
 export type ProfileRow = {
   id: string;
+  name: string | null;
   zone: number[];
   xp: number;
   streak: number;
@@ -38,5 +39,6 @@ export type EntryRow = {
   title: string;
   tag: string;
   feel: string | null;
+  note: string | null;
   created_at: string;
 };

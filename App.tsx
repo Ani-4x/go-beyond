@@ -5,6 +5,7 @@ import { InstrumentSans_500Medium } from '@expo-google-fonts/instrument-sans/500
 import { InstrumentSans_600SemiBold } from '@expo-google-fonts/instrument-sans/600SemiBold';
 import { useFonts } from 'expo-font';
 import React from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { AuthProvider } from './src/state/auth';
@@ -22,14 +23,17 @@ export default function App() {
   if (!loaded) return null;
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <StoreProvider>
-            <RootNavigator />
-          </StoreProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    // Required root for react-native-gesture-handler (the Today screen's swipe cards).
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <StoreProvider>
+              <RootNavigator />
+            </StoreProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
