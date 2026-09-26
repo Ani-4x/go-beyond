@@ -10,6 +10,7 @@ import {
   TIPS,
   XP,
 } from '../data/content';
+import { generateChallenge, embedEntry } from '../lib/ai';
 import { dayKey, yesterdayKey } from '../lib/date';
 import { EntryRow, ProfileRow, supabase } from '../lib/supabase';
 import { useAuth } from './auth';
@@ -36,6 +37,13 @@ export type QuestItem = {
   level: Level;
   done: boolean;
   doneAt?: number;
+  // AI-generated content for this candidate, filled in shortly after the pool is created.
+  // Absent (offline, generation failed, or still in flight) falls back to the static library
+  // in `enrich()`, so the card always has something to show — never a loading spinner.
+  aiText?: string;
+  aiMinutes?: number;
+  aiTips?: [string, string, string];
+  aiDoneText?: string;
 };
 
 export type TodayQuests = {
@@ -103,7 +111,7 @@ export const weakestDim = (zone: number[], avoid?: number): DimIndex => {
 };
 
 /** Every dimension, weakest first — the order candidates are offered in the swipe stack. */
-function allDimsByWeakness(zone: number[]): DimIndex[] {
+export function allDimsByWeakness(zone: number[]): DimIndex[] {
   return zone
     .map((v, i) => ({ v, i }))
     .sort((a, b) => a.v - b.v)
@@ -160,6 +168,14 @@ type Action =
   | { type: 'completeOnboarding' }
   | { type: 'setName'; name: string | null }
   | { type: 'ensureToday'; now: number; ids: string[] }
+  | {
+      type: 'setItemContent';
+      id: string;
+      text: string;
+      minutes: number;
+      tips: [string, string, string];
+      doneText: string;
+    }
   | { type: 'swipeCandidate'; id: string; accept: boolean }
   | { type: 'completeItem'; itemId: string; entryId: string; feel?: string; now: number }
   | { type: 'addMoment'; id: string; title: string; tag: string; feel?: string; note?: string; now: number }
@@ -194,6 +210,18 @@ function reducer(state: State, action: Action): State {
         done: false,
       }));
       return { ...state, today: { date: key, pool, accepted: [] } };
+    }
+
+    case 'setItemContent': {
+      const t = state.today;
+      if (!t) return state;
+      const patch = (i: QuestItem): QuestItem =>
+        i.id === action.id
+          ? { ...i, aiText: action.text, aiMinutes: action.minutes, aiTips: action.tips, aiDoneText: action.doneText }
+          : i;
+      // The card may have already been swiped into `accepted` by the time this resolves —
+      // patch whichever array actually has it; the other pass-through is a harmless no-op.
+      return { ...state, today: { ...t, pool: t.pool.map(patch), accepted: t.accepted.map(patch) } };
     }
 
     case 'swipeCandidate': {
@@ -390,16 +418,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (syncedEntryIds.current.has(e.id)) continue;
       syncedEntryIds.current.add(e.id);
       withRetry('save entry', () =>
-        supabase.from('entries').insert({
-          id: e.id,
-          user_id: userId,
-          type: e.type,
-          title: e.title,
-          tag: e.tag,
-          feel: e.feel ?? null,
-          note: e.note ?? null,
-          created_at: new Date(e.ts).toISOString(),
-        }),
+        supabase
+          .from('entries')
+          .insert({
+            id: e.id,
+            user_id: userId,
+            type: e.type,
+            title: e.title,
+            tag: e.tag,
+            feel: e.feel ?? null,
+            note: e.note ?? null,
+            created_at: new Date(e.ts).toISOString(),
+          })
+          .then((res) => {
+            // Best-effort: index this entry for future challenge generation to find. Only
+            // once the row actually exists, so the Edge Function has something to read.
+            if (!res.error) embedEntry(e.id);
+            return res;
+          }),
       );
     }
   }, [state.ready, userId, state.entries]);
@@ -411,9 +447,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const completeOnboarding = useCallback(() => dispatch({ type: 'completeOnboarding' }), []);
   const setName = useCallback((name: string) => dispatch({ type: 'setName', name: name.trim() || null }), []);
   const ensureToday = useCallback(() => {
+    const key = dayKey(Date.now());
+    if (state.today && state.today.date === key) return; // already generated for today
     const ids = Array.from({ length: DIMENSIONS.length }, () => Crypto.randomUUID());
     dispatch({ type: 'ensureToday', now: Date.now(), ids });
-  }, []);
+    // The pool already shows a static fallback challenge for each card, so there's nothing to
+    // wait on here — each dimension's AI-personalized text upgrades its card in place as it
+    // resolves, independently, and a failed one just keeps its fallback.
+    const dims = allDimsByWeakness(state.zone);
+    dims.forEach((dim, i) => {
+      const level = levelFor(state.zone[dim]);
+      generateChallenge(dim, level).then((result) => {
+        if (result) {
+          dispatch({
+            type: 'setItemContent',
+            id: ids[i],
+            text: result.text,
+            minutes: result.minutes,
+            tips: result.tips,
+            doneText: result.done,
+          });
+        }
+      });
+    });
+  }, [state.today, state.zone]);
   const swipeCandidate = useCallback(
     (id: string, accept: boolean) => dispatch({ type: 'swipeCandidate', id, accept }),
     [],
@@ -498,7 +555,11 @@ export type EnrichedItem = QuestItem & {
 };
 
 function enrich(item: QuestItem): EnrichedItem {
-  return { ...item, challenge: CHALLENGES[item.dim][item.level], dimLabel: DIMENSIONS[item.dim], tips: TIPS[item.dim] };
+  const fallback = CHALLENGES[item.dim][item.level];
+  const challenge = item.aiText
+    ? { text: item.aiText, minutes: item.aiMinutes ?? fallback.minutes, done: item.aiDoneText ?? fallback.done }
+    : fallback;
+  return { ...item, challenge, dimLabel: DIMENSIONS[item.dim], tips: item.aiTips ?? TIPS[item.dim] };
 }
 
 /** Today's swipe pool and accepted checklist, enriched with actual challenge text. */

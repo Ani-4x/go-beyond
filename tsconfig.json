@@ -2,5 +2,8 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  // supabase/functions runs on Deno, a separate runtime/toolchain from the Expo app (see
+  // its own README note) — never part of this project's type-check.
+  "exclude": ["node_modules", "supabase/functions"]
 }
