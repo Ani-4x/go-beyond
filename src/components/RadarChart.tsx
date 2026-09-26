@@ -130,6 +130,7 @@ export function RadarChart({ from, to, focus, width, labels = true, delay = 0, o
   }, [halo]);
 
   const zoneProps = useAnimatedProps(() => ({ d: polyPath(blend(fromSV.value, toSV.value, p.value)) }));
+  const zoneGlowProps = useAnimatedProps(() => ({ d: polyPath(blend(fromSV.value, toSV.value, p.value)) }));
   const edgeProps = useAnimatedProps(() => ({
     d: polyPath(blend(fromSV.value, toSV.value, p.value).map((v) => Math.min(1, v + EDGE_GAP))),
   }));
@@ -148,11 +149,11 @@ export function RadarChart({ from, to, focus, width, labels = true, delay = 0, o
     >
       <Svg width={width} height={height} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}>
         {[0.25, 0.5, 0.75, 1].map((r) => (
-          <Polygon key={r} points={ring(r)} fill="none" stroke={t.line} strokeWidth={1} />
+          <Polygon key={r} points={ring(r)} fill="none" stroke={t.line} strokeWidth={1} strokeOpacity={0.7} />
         ))}
         {Array.from({ length: 6 }, (_, i) => {
           const pt = pointAt(i, 1);
-          return <Line key={i} x1={0} y1={0} x2={pt.x} y2={pt.y} stroke={t.line} strokeWidth={1} />;
+          return <Line key={i} x1={0} y1={0} x2={pt.x} y2={pt.y} stroke={t.line} strokeWidth={1} strokeOpacity={0.55} />;
         })}
 
         <AnimatedPath
@@ -164,11 +165,21 @@ export function RadarChart({ from, to, focus, width, labels = true, delay = 0, o
           strokeDasharray={[3, 5]}
           strokeLinejoin="round"
         />
+        {/* A soft, wider stroke underneath gives the zone shape a gentle glow at its edge. */}
+        <AnimatedPath
+          d={polyPath(from)}
+          animatedProps={zoneGlowProps}
+          fill="none"
+          stroke={t.accent}
+          strokeOpacity={0.22}
+          strokeWidth={labels ? 9 : 6}
+          strokeLinejoin="round"
+        />
         <AnimatedPath
           d={polyPath(from)}
           animatedProps={zoneProps}
           fill={t.accent}
-          fillOpacity={0.2}
+          fillOpacity={0.22}
           stroke={t.accent}
           strokeWidth={2.5}
           strokeLinejoin="round"

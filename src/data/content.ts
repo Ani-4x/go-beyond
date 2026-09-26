@@ -1,3 +1,5 @@
+import type { IconName } from '../components/Icons';
+
 export const DIMENSIONS = [
   'Confidence',
   'Social',
@@ -155,15 +157,43 @@ export const LEVEL_LABEL: Record<Level, string> = { 1: 'Easy', 2: 'Medium', 3: '
 /** The gap between where you are comfortable and your edge. */
 export const EDGE_GAP = 0.15;
 
-export const MOMENT_CATEGORIES = [
-  { key: 'Reflect', hint: 'Learn, read, or think.' },
-  { key: 'Move', hint: 'Exercise or get outside.' },
-  { key: 'Connect', hint: 'Spend time with someone.' },
-  { key: 'Explore', hint: 'Try or visit something new.' },
-  { key: 'Build', hint: 'Work toward a goal.' },
-  { key: 'Reset', hint: 'Rest and make space.' },
-] as const;
+/** Color + icon for a challenge entry, keyed by dimension — used in the journal and checklist. */
+export const DIMENSION_STYLE: Record<DimIndex, { color: string; icon: IconName }> = {
+  0: { color: '#8B7FFF', icon: 'brain' },
+  1: { color: '#6C6FE0', icon: 'people' },
+  2: { color: '#FF9F45', icon: 'chart' },
+  3: { color: '#8B7FFF', icon: 'brain' },
+  4: { color: '#4FA8E8', icon: 'pin' },
+  5: { color: '#4CC38A', icon: 'leaf' },
+};
+
+export const MOMENT_CATEGORIES: { key: string; hint: string; color: string; icon: IconName }[] = [
+  { key: 'Reflect', hint: 'Learn, read, or think.', color: '#8B7FFF', icon: 'brain' },
+  { key: 'Move', hint: 'Exercise or get outside.', color: '#5B8DEF', icon: 'run' },
+  { key: 'Connect', hint: 'Spend time with someone.', color: '#6C6FE0', icon: 'people' },
+  { key: 'Explore', hint: 'Try or visit something new.', color: '#4FA8E8', icon: 'pin' },
+  { key: 'Build', hint: 'Work toward a goal.', color: '#FF9F45', icon: 'chart' },
+  { key: 'Reset', hint: 'Rest and make space.', color: '#4CC38A', icon: 'leaf' },
+];
+
+/** Looks up the color + icon for any journal entry, challenge or moment. */
+export function styleForEntry(type: 'challenge' | 'moment', tag: string): { color: string; icon: IconName } {
+  if (type === 'challenge') {
+    const dim = DIMENSIONS.indexOf(tag as (typeof DIMENSIONS)[number]);
+    if (dim >= 0) return DIMENSION_STYLE[dim as DimIndex];
+  }
+  return MOMENT_CATEGORIES.find((c) => c.key === tag) ?? { color: '#8B7FFF', icon: 'brain' };
+}
 
 export const FEELINGS = ['Low', 'Steady', 'Good', 'Bright'] as const;
 
 export const ZERO_ZONE = [0, 0, 0, 0, 0, 0];
+
+/** Rotates by day so the hero card's quote feels alive without any extra state to track. */
+export const QUOTES = [
+  'Growth lives outside your comfort zone.',
+  'Small steps, repeated, become a different life.',
+  'The edge moves only when you step past it.',
+  'Comfort is a place to visit, not to live.',
+  'Today is just one more brick in the wall you\u2019re building.',
+];

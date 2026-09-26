@@ -1,7 +1,10 @@
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import React, { useEffect } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   FadeInDown,
@@ -14,23 +17,39 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { ScrollView } from 'react-native-gesture-handler';
+import { scheduleOnRN } from 'react-native-worklets';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
-import { Button } from '../components/Button';
 import { DrawCheck, Icon } from '../components/Icons';
-import { RadarChart } from '../components/RadarChart';
-import { Ripples } from '../components/Ripples';
+import { MountainScene } from '../components/MountainScene';
+import { PressableScale } from '../components/PressableScale';
 import { StaggerIn } from '../components/StaggerIn';
-import { LEVEL_LABEL, Level, ZERO_ZONE } from '../data/content';
-import { dayKey, longDate, weekDays } from '../lib/date';
+import { DIMENSION_STYLE, QUOTES, XP as XP_TABLE } from '../data/content';
 import { useReplayKey, useSeen } from '../lib/hooks';
 import type { TabParamList, TabScreenNav } from '../navigation/types';
-import { useStore, useToday, weakestDim } from '../state/store';
-import { ease, spring } from '../theme/motion';
+import { useAuth } from '../state/auth';
+import { EnrichedItem, useStore, useTodayQuests } from '../state/store';
+import { spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { fonts, radius } from '../theme/tokens';
+import { brand, fonts, glowElevation, radius, surfaceElevation } from '../theme/tokens';
 
-/* ---------------------------- pieces ---------------------------- */
+const SWIPE_THRESHOLD = 110;
+const VELOCITY_THRESHOLD = 750;
+
+/* ---------------------------- small pieces ---------------------------- */
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
+function displayName(name: string | null | undefined, email: string | undefined) {
+  if (name) return name;
+  if (!email) return '';
+  const local = email.split('@')[0];
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
 
 function StreakChip({ streak }: { streak: number }) {
   const t = useTheme();
@@ -53,7 +72,7 @@ function StreakChip({ streak }: { streak: number }) {
   const chipStyle = useAnimatedStyle(() => ({ transform: [{ scale: bump.value }] }));
 
   return (
-    <Animated.View style={[styles.streak, { backgroundColor: t.surface, borderColor: t.line }, chipStyle]}>
+    <Animated.View style={[styles.streak, surfaceElevation(t), chipStyle]}>
       <Animated.View style={flameStyle}>
         <Icon name="flame" size={15} color={t.ember} />
       </Animated.View>
@@ -62,58 +81,207 @@ function StreakChip({ streak }: { streak: number }) {
   );
 }
 
-function Difficulty({ level }: { level: Level }) {
+/* ---------------------------- swipe stack ---------------------------- */
+
+/** The visual only — no interaction. Both the top (interactive) and next (peeking) card use this. */
+function CandidateCard({ item, overlay }: { item: EnrichedItem; overlay?: React.ReactNode }) {
+  const style = DIMENSION_STYLE[item.dim];
+  const quote = QUOTES[(Math.floor(Date.now() / 86400000) + item.dim) % QUOTES.length];
   return (
-    <View style={styles.diff} accessibilityLabel={`Difficulty ${LEVEL_LABEL[level]}`}>
-      <View style={{ flexDirection: 'row', gap: 4 }}>
-        {[1, 2, 3].map((n) =>
-          n <= level ? (
-            <Animated.View
-              key={`${level}-${n}`}
-              entering={ZoomIn.delay(n * 120).springify()}
-              style={[styles.pip, { backgroundColor: '#fff' }]}
-            />
-          ) : (
-            <View key={n} style={[styles.pip, { backgroundColor: 'rgba(255,255,255,0.35)' }]} />
-          ),
-        )}
+    <View style={styles.hero}>
+      <MountainScene style={StyleSheet.absoluteFill} />
+      <LinearGradient
+        colors={['rgba(16,15,40,0)', 'rgba(12,10,28,0.55)', 'rgba(10,8,24,0.92)']}
+        locations={[0, 0.5, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <AppText variant="medium" color="rgba(255,255,255,0.82)" style={{ fontSize: 14 }}>
+        A challenge for {item.dimLabel.toLowerCase()}
+      </AppText>
+      <AppText variant="hero" color="#fff" style={styles.heroTitle} numberOfLines={4}>
+        {item.challenge.text}
+      </AppText>
+      <View style={styles.heroMeta}>
+        <View style={[styles.metaPill, { backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+          <Icon name={style.icon} size={13} color="#fff" />
+          <AppText variant="label" color="#fff" style={{ fontSize: 13 }}>{item.dimLabel}</AppText>
+        </View>
+        <View style={[styles.metaPill, { backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+          <AppText variant="label" color="#fff" style={{ fontSize: 13 }}>+{XP_TABLE[item.level]} XP</AppText>
+        </View>
       </View>
-      <AppText variant="caption" color="#fff">{LEVEL_LABEL[level]}</AppText>
+      <AppText variant="small" color="rgba(255,255,255,0.85)" style={styles.quote} numberOfLines={2}>
+        "{quote}"
+      </AppText>
+      {overlay}
     </View>
   );
 }
 
-type DayState = 'done' | 'today' | 'missed' | 'future';
-
-function DayDot({ label, state, fresh }: { label: string; state: DayState; fresh: boolean }) {
+/**
+ * Swipe right to add a challenge to today's list, left to pass on it — no cap on how many you
+ * can accept. Buttons underneath do the same thing for anyone who'd rather tap than drag.
+ */
+function SwipeStack({ pool, onSwipe }: { pool: EnrichedItem[]; onSwipe: (id: string, accept: boolean) => void }) {
   const t = useTheme();
-  const ring = useSharedValue(0);
-  useEffect(() => {
-    if (fresh) ring.value = withDelay(300, withTiming(1, { duration: 1100, easing: Easing.out(Easing.quad) }));
-  }, [fresh, ring]);
-  const ringStyle = useAnimatedStyle(() => ({ opacity: 0.6 * (1 - ring.value), transform: [{ scale: 1 + ring.value * 0.9 }] }));
+  const { width } = useWindowDimensions();
+  const top = pool[0];
+  const next = pool[1];
 
-  const base = { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' } as const;
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+  const gone = useSharedValue(false);
+
+  useEffect(() => {
+    dragX.value = 0;
+    dragY.value = 0;
+    gone.value = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top?.id]);
+
+  const finish = (id: string, accept: boolean) => onSwipe(id, accept);
+
+  const fly = (accept: boolean) => {
+    if (!top || gone.value) return;
+    gone.value = true;
+    Haptics.impactAsync(accept ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const toX = (accept ? 1 : -1) * width * 1.4;
+    dragX.value = withTiming(toX, { duration: 280, easing: Easing.out(Easing.cubic) }, (finished) => {
+      if (finished) scheduleOnRN(finish, top.id, accept);
+    });
+    dragY.value = withTiming(dragY.value + 24, { duration: 280 });
+  };
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      if (gone.value) return;
+      dragX.value = e.translationX;
+      dragY.value = e.translationY * 0.2;
+    })
+    .onEnd((e) => {
+      if (gone.value || !top) return;
+      const past = Math.abs(e.translationX) > SWIPE_THRESHOLD || Math.abs(e.velocityX) > VELOCITY_THRESHOLD;
+      if (past) {
+        gone.value = true;
+        Haptics.impactAsync(e.translationX > 0 ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        const toX = (e.translationX > 0 ? 1 : -1) * width * 1.4;
+        dragX.value = withTiming(toX, { duration: 240, easing: Easing.out(Easing.cubic) }, (finished) => {
+          if (finished) scheduleOnRN(finish, top.id, e.translationX > 0);
+        });
+        dragY.value = withTiming(dragY.value, { duration: 240 });
+      } else {
+        dragX.value = withSpring(0, spring.gentle);
+        dragY.value = withSpring(0, spring.gentle);
+      }
+    });
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: dragX.value }, { translateY: dragY.value }, { rotate: `${dragX.value / 18}deg` }],
+  }));
+  const acceptStamp = useAnimatedStyle(() => ({ opacity: Math.max(0, Math.min(1, dragX.value / 90)) }));
+  const declineStamp = useAnimatedStyle(() => ({ opacity: Math.max(0, Math.min(1, -dragX.value / 90)) }));
+  const nextStyle = useAnimatedStyle(() => {
+    const p = Math.min(1, Math.abs(dragX.value) / 200);
+    return { transform: [{ scale: 0.93 + 0.07 * p }, { translateY: 12 - 12 * p }], opacity: 0.55 + 0.45 * p };
+  });
+
+  if (!top) {
+    return (
+      <View style={[styles.emptyStack, surfaceElevation(t)]}>
+        <Icon name="check" size={18} color={t.muted} />
+        <AppText variant="small" muted style={{ flex: 1 }}>
+          You've reviewed every challenge type for today.
+        </AppText>
+      </View>
+    );
+  }
+
   return (
-    <View style={{ alignItems: 'center', gap: 6 }}>
-      {state === 'done' && fresh ? (
-        <Animated.View entering={ZoomIn.delay(300).springify()} style={[base, { backgroundColor: t.cobalt }]}>
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: 17, borderWidth: 2, borderColor: t.ember }, ringStyle]} />
-          <DrawCheck size={15} color="#fff" strokeWidth={3} delay={500} />
-        </Animated.View>
-      ) : state === 'done' ? (
-        <View style={[base, { backgroundColor: t.cobalt }]}>
-          <Icon name="check" size={15} color="#fff" strokeWidth={2.8} />
-        </View>
-      ) : state === 'today' ? (
-        <View style={[base, { borderWidth: 2, borderColor: t.ember }]} />
-      ) : state === 'missed' ? (
-        <View style={[base, { borderWidth: 1.5, borderStyle: 'dashed', borderColor: t.line }]} />
-      ) : (
-        <View style={[base, { borderWidth: 1.5, borderColor: t.line, opacity: 0.55 }]} />
-      )}
-      <AppText variant="caption" muted>{label}</AppText>
+    <View>
+      <View style={styles.stackArea}>
+        {next && (
+          <Animated.View style={[styles.cardAbs, styles.heroShadow, nextStyle]}>
+            <CandidateCard item={next} />
+          </Animated.View>
+        )}
+        <GestureDetector gesture={pan}>
+          <Animated.View style={[styles.cardAbs, styles.heroShadow, cardStyle]}>
+            <CandidateCard
+              item={top}
+              overlay={
+                <>
+                  <Animated.View style={[styles.stamp, styles.stampAccept, acceptStamp]}>
+                    <AppText variant="label" color="#5FE3A6" style={styles.stampText}>ADD</AppText>
+                  </Animated.View>
+                  <Animated.View style={[styles.stamp, styles.stampDecline, declineStamp]}>
+                    <AppText variant="label" color="#FF8C8C" style={styles.stampText}>SKIP</AppText>
+                  </Animated.View>
+                </>
+              }
+            />
+          </Animated.View>
+        </GestureDetector>
+      </View>
+      <View style={styles.swipeButtons}>
+        <PressableScale
+          onPress={() => fly(false)}
+          scaleTo={0.88}
+          haptic
+          accessibilityRole="button"
+          accessibilityLabel="Skip this challenge"
+          style={[styles.swipeBtn, surfaceElevation(t)]}
+        >
+          <Icon name="close" size={22} color={t.muted} />
+        </PressableScale>
+        <AppText variant="caption" muted>Swipe, or tap to choose</AppText>
+        <PressableScale
+          onPress={() => fly(true)}
+          scaleTo={0.88}
+          accessibilityRole="button"
+          accessibilityLabel="Add this challenge"
+          style={[styles.swipeBtn, styles.swipeBtnAccept, glowElevation(brand.cobalt, 0.35)]}
+        >
+          <Icon name="check" size={22} color="#fff" strokeWidth={3} />
+        </PressableScale>
+      </View>
     </View>
+  );
+}
+
+function ChecklistRow({ item, index, onPress }: { item: EnrichedItem; index: number; onPress: () => void }) {
+  const t = useTheme();
+  const style = DIMENSION_STYLE[item.dim];
+  return (
+    <Animated.View entering={FadeInDown.delay(index * 70).duration(450)}>
+      <PressableScale
+        onPress={item.done ? undefined : onPress}
+        disabled={item.done}
+        scaleTo={0.98}
+        haptic
+        accessibilityRole="button"
+        accessibilityState={{ disabled: item.done }}
+        style={[styles.row, surfaceElevation(t), item.done && styles.rowDone]}
+      >
+        <View style={[styles.check, item.done ? { backgroundColor: t.cobalt } : { borderWidth: 2, borderColor: t.line }]}>
+          {item.done && <Icon name="check" size={13} color="#fff" strokeWidth={3} />}
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppText variant="medium" muted={item.done} style={item.done ? styles.strike : undefined} numberOfLines={2}>
+            {item.challenge.text}
+          </AppText>
+          <View style={styles.rowMeta}>
+            <Icon name={style.icon} size={12} color={style.color} />
+            <AppText variant="caption" color={style.color}>{item.dimLabel}</AppText>
+            {item.done && item.doneAt && (
+              <AppText variant="caption" muted>
+                {' \u2022 '}
+                {new Date(item.doneAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+              </AppText>
+            )}
+          </View>
+        </View>
+      </PressableScale>
+    </Animated.View>
   );
 }
 
@@ -122,105 +290,65 @@ function DayDot({ label, state, fresh }: { label: string; state: DayState; fresh
 function TodayContent() {
   const t = useTheme();
   const nav = useNavigation<TabScreenNav<'Today'>>();
-  const { state, setShrunk } = useStore();
-  const info = useToday();
-  const wasDone = useSeen('todayDone', state.today?.done ? 1 : 0);
+  const { state, swipeCandidate } = useStore();
+  const { session } = useAuth();
+  const quests = useTodayQuests();
 
-  if (!info) return <View style={{ flex: 1 }} />;
-  const { today, level, baseLevel, challenge, dimLabel } = info;
-  const canResize = baseLevel > 1 || today.shrunk;
-  const pct = Math.round(state.zone[today.dim] * 100);
-  const smallest = weakestDim(state.zone) === today.dim;
-  const todayKey = dayKey();
-  const justFinished = today.done && wasDone === 0;
-
-  const meta =
-    `About ${challenge.minutes} minutes. ` + (level === 1 ? 'Easy to start.' : level === 2 ? 'No prep needed.' : 'A real stretch.');
+  if (!quests) return <View style={{ flex: 1 }} />;
+  const { pool, accepted, completedCount, total } = quests;
+  const name = displayName(state.name, session?.user.email);
+  const nothingChosen = pool.length === 0 && total === 0;
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <StaggerIn index={0} style={styles.headerRow}>
-        <AppText variant="medium" muted>{longDate()}</AppText>
+        <View>
+          <AppText variant="medium" muted>{greeting()}{name ? ',' : ''}</AppText>
+          {!!name && <AppText variant="title" style={{ marginTop: 2 }}>{name}</AppText>}
+        </View>
         <StreakChip streak={state.streak} />
       </StaggerIn>
 
-      {!today.done ? (
-        <StaggerIn index={1}>
-          <View style={[styles.hero, { backgroundColor: t.cobalt }]}>
-            <Ripples size={220} style={{ right: -70, top: -70 }} />
-            <View style={styles.heroTop}>
-              <View style={styles.pill}>
-                <AppText variant="label" color="#fff" style={{ fontSize: 13 }}>{dimLabel}</AppText>
-              </View>
-              <Difficulty level={level} />
-            </View>
-            <Animated.View key={challenge.text} entering={FadeInDown.duration(380).easing(ease)}>
-              <AppText variant="hero" color="#fff">{challenge.text}</AppText>
-              <AppText variant="small" color="rgba(255,255,255,0.85)" style={{ marginTop: 14, marginBottom: 22 }}>{meta}</AppText>
-            </Animated.View>
-            <Button label="Start challenge" onPress={() => nav.navigate('Focus')} />
-            {canResize && (
-              <Button
-                variant="ghost"
-                color="#fff"
-                label={today.shrunk ? 'Make it bigger' : 'Make it smaller'}
-                onPress={() => setShrunk(!today.shrunk)}
-              />
-            )}
-          </View>
-        </StaggerIn>
-      ) : (
-        <StaggerIn index={1}>
-          <View style={[styles.doneCard, { backgroundColor: t.tint }]}>
-            <Animated.View entering={ZoomIn.delay(150).springify()} style={[styles.tick, { backgroundColor: t.cobalt }]}>
-              <DrawCheck size={22} color="#fff" delay={450} />
-            </Animated.View>
-            <AppText variant="title" style={{ marginBottom: 8 }}>Today's challenge is done.</AppText>
-            <AppText variant="small" muted style={{ marginBottom: 16 }}>
-              Your next one unlocks tomorrow morning, chosen from your new edge.
-            </AppText>
-            <Button label="Add a moment" onPress={() => nav.navigate('Journal', { openCapture: true })} />
-          </View>
-        </StaggerIn>
-      )}
+      <StaggerIn index={1}>
+        <AppText variant="small" muted style={{ marginTop: -4 }}>
+          Pick as many, or as few, as you're up for today.
+        </AppText>
+      </StaggerIn>
 
       <StaggerIn index={2}>
-        <View style={[styles.card, styles.why, { backgroundColor: t.surface, borderColor: t.line }]}>
-          <RadarChart from={ZERO_ZONE} to={state.zone} focus={today.dim} width={84} labels={false} delay={350} />
-          <AppText variant="small" muted style={{ flex: 1 }}>
-            {today.done ? (
-              <>
-                <AppText variant="small" style={styles.strong}>{dimLabel} grew to {pct}%.</AppText> Tomorrow's challenge will come from your new edge.
-              </>
-            ) : (
-              <>
-                <AppText variant="small" style={styles.strong}>
-                  {smallest ? `${dimLabel} is your smallest zone at ${pct}%.` : `${dimLabel} is still growing at ${pct}%.`}
-                </AppText>{' '}
-                This challenge nudges its edge outward.
-              </>
-            )}
-          </AppText>
-        </View>
+        <SwipeStack pool={pool} onSwipe={swipeCandidate} />
       </StaggerIn>
 
-      <StaggerIn index={3}>
-        <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.line }]}>
-          <AppText variant="label" muted style={{ marginBottom: 12 }}>This week</AppText>
-          <View style={styles.days}>
-            {weekDays().map((d) => {
-              const done = state.completedDays.includes(d.key);
-              const s: DayState = done ? 'done' : d.key === todayKey ? 'today' : d.key < todayKey ? 'missed' : 'future';
-              return <DayDot key={d.key} label={d.label} state={s} fresh={s === 'done' && d.key === todayKey && justFinished} />;
-            })}
+      {nothingChosen ? (
+        <StaggerIn index={3}>
+          <AppText variant="small" muted style={{ textAlign: 'center', marginTop: 4 }}>
+            Nothing added yet today — that's alright too.
+          </AppText>
+        </StaggerIn>
+      ) : total > 0 ? (
+        <>
+          <StaggerIn index={3} style={styles.progressRow}>
+            <AppText variant="label" style={{ fontSize: 16 }}>Your progress today</AppText>
+            <AppText variant="small" muted>{completedCount} of {total} completed</AppText>
+          </StaggerIn>
+          <StaggerIn index={4}>
+            <View style={[styles.track, { backgroundColor: t.line }]}>
+              <View style={[styles.fill, { backgroundColor: t.cobalt, width: `${(completedCount / total) * 100}%` }]} />
+            </View>
+          </StaggerIn>
+
+          <View style={styles.checklist}>
+            {accepted.map((item, i) => (
+              <ChecklistRow key={item.id} item={item} index={i} onPress={() => nav.navigate('Focus', { itemId: item.id })} />
+            ))}
           </View>
-        </View>
-      </StaggerIn>
+        </>
+      ) : null}
     </ScrollView>
   );
 }
 
-/** Act starts here: one challenge, nothing competing with it. */
+/** Act starts here: swipe through today's candidates, then work the ones you kept. */
 export function TodayScreen(_props: BottomTabScreenProps<TabParamList, 'Today'>) {
   const t = useTheme();
   const replay = useReplayKey(); // remount on focus so the entrance replays
@@ -232,18 +360,45 @@ export function TodayScreen(_props: BottomTabScreenProps<TabParamList, 'Today'>)
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 32, gap: 14 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  streak: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1.5 },
-  hero: { borderRadius: radius.xl, padding: 22, paddingBottom: 14, overflow: 'hidden' },
-  heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
-  pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.18)' },
-  diff: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pip: { width: 8, height: 8, borderRadius: 4 },
-  doneCard: { borderRadius: radius.xl, padding: 24 },
-  tick: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  card: { borderRadius: radius.lg, borderWidth: 1.5, padding: 16 },
-  why: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  strong: { fontFamily: fonts.semibold },
-  days: { flexDirection: 'row', justifyContent: 'space-between' },
+  scroll: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 150, gap: 14 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  streak: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill },
+
+  stackArea: { height: 300 },
+  cardAbs: { position: 'absolute', left: 0, right: 0, top: 0 },
+  heroShadow: { borderRadius: radius.xl, ...glowElevation(brand.cobalt, 0.3) },
+  hero: { borderRadius: radius.xl, padding: 20, overflow: 'hidden', minHeight: 280, justifyContent: 'space-between' },
+  heroTitle: { fontSize: 24, lineHeight: 28, marginTop: 10 },
+  heroMeta: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  metaPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 11, paddingVertical: 6, borderRadius: radius.pill },
+  quote: { fontStyle: 'italic', marginTop: 14 },
+
+  stamp: {
+    position: 'absolute',
+    top: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 2.5,
+  },
+  stampAccept: { left: 18, borderColor: '#5FE3A6', transform: [{ rotate: '-14deg' }] },
+  stampDecline: { right: 18, borderColor: '#FF8C8C', transform: [{ rotate: '14deg' }] },
+  stampText: { fontSize: 15, letterSpacing: 1.5 },
+
+  swipeButtons: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, paddingHorizontal: 8 },
+  swipeBtn: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  swipeBtnAccept: { backgroundColor: brand.cobalt },
+
+  emptyStack: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: radius.lg, padding: 16 },
+
+  progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 },
+  track: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4 },
+
+  checklist: { gap: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: radius.lg },
+  rowDone: { opacity: 0.6 },
+  strike: { textDecorationLine: 'line-through' },
+  check: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
 });

@@ -16,7 +16,7 @@ import { WordReveal } from '../components/StaggerIn';
 import { useAuth } from '../state/auth';
 import { ease } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { fonts } from '../theme/tokens';
+import { fonts, surfaceElevation } from '../theme/tokens';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -45,7 +45,7 @@ export function AuthScreen() {
   };
 
   const submitCode = async () => {
-    if (code.trim().length < 8 || busy) return;
+    if (code.trim().length < 6 || busy) return;
     setBusy(true);
     setError(null);
     const { error: err } = await verifyCode(email, code);
@@ -99,24 +99,24 @@ export function AuthScreen() {
                 }}
                 scaleTo={0.9}
                 accessibilityLabel="Use a different email"
-                style={[styles.back, { backgroundColor: t.surface, borderColor: t.line }]}
+                style={[styles.back, surfaceElevation(t)]}
               >
                 <Icon name="back" color={t.ink} />
               </PressableScale>
               <WordReveal text="Check your email." delay={80} />
-              <AppText variant="small" muted style={{ marginTop: 12 }}>We sent a 8-digit code to {email}.</AppText>
+              <AppText variant="small" muted style={{ marginTop: 12 }}>We sent a 6-digit code to {email}.</AppText>
               <TextInput
                 ref={codeInput}
                 value={code}
                 onChangeText={(v) => {
-                  setCode(v.replace(/[^0-9]/g, '').slice(0, 8));
+                  setCode(v.replace(/[^0-9]/g, '').slice(0, 6));
                   setError(null);
                 }}
                 placeholder="000000"
                 placeholderTextColor={t.muted}
                 keyboardType="number-pad"
                 textContentType="oneTimeCode"
-                maxLength={8}
+                maxLength={6}
                 returnKeyType="done"
                 onSubmitEditing={submitCode}
                 style={[styles.input, styles.code, { backgroundColor: t.surface, borderColor: error ? t.ember : t.line, color: t.ink }]}
@@ -130,7 +130,7 @@ export function AuthScreen() {
                 <AppText variant="small" muted>Didn't get it? Send again</AppText>
               </PressableScale>
             </View>
-            <Button label={busy ? 'Checking…' : 'Verify'} disabled={code.length < 8 || busy} onPress={submitCode} />
+            <Button label={busy ? 'Checking…' : 'Verify'} disabled={code.length < 6 || busy} onPress={submitCode} />
           </Animated.View>
         )}
       </KeyboardAvoidingView>
@@ -141,7 +141,7 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   body: { flex: 1, paddingHorizontal: 22, paddingBottom: 12 },
-  back: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   input: { height: 54, borderRadius: 18, borderWidth: 1.5, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 17, marginTop: 22 },
   code: { fontSize: 22, letterSpacing: 6, fontFamily: fonts.semibold },
 });

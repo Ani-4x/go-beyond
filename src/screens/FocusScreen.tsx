@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -6,23 +7,25 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
 import { Button } from '../components/Button';
+import { GlowField } from '../components/GlowField';
 import { Icon } from '../components/Icons';
 import { PressableScale } from '../components/PressableScale';
 import { Ripples } from '../components/Ripples';
 import { StaggerIn } from '../components/StaggerIn';
 import type { RootStackParamList } from '../navigation/types';
-import { useToday } from '../state/store';
+import { useQuestItem } from '../state/store';
 import { ease } from '../theme/motion';
-import { useTheme } from '../theme/ThemeProvider';
+import { gradients } from '../theme/tokens';
 
 /** Act: a calm focus mode. No timer, no pressure. */
-export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Focus'>) {
-  const t = useTheme();
-  const info = useToday();
-  if (!info) return null;
+export function FocusScreen({ navigation, route }: NativeStackScreenProps<RootStackParamList, 'Focus'>) {
+  const item = useQuestItem(route.params.itemId);
+  if (!item) return null;
 
   return (
-    <View style={[styles.root, { backgroundColor: t.cobalt }]}>
+    <View style={styles.root}>
+      <LinearGradient colors={gradients.cobalt} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />
+      <GlowField color="#B7A9FF" size={340} opacity={0.4} style={styles.glow} />
       <StatusBar style="light" />
       <Ripples size={320} style={{ right: -100, top: -60 }} />
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
@@ -35,10 +38,10 @@ export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackPara
           </StaggerIn>
 
           <StaggerIn index={1}>
-            <AppText variant="display" color="#fff" style={styles.title}>{info.challenge.text}</AppText>
+            <AppText variant="display" color="#fff" style={styles.title}>{item.challenge.text}</AppText>
           </StaggerIn>
 
-          {info.tips.map((tip, i) => (
+          {item.tips.map((tip: string, i: number) => (
             <Animated.View key={tip} entering={FadeInDown.delay(500 + i * 120).duration(500).easing(ease)} style={styles.tip}>
               <AppText variant="medium" color="#fff" style={{ fontSize: 15.5 }}>{tip}</AppText>
             </Animated.View>
@@ -50,7 +53,7 @@ export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackPara
         </View>
 
         <Animated.View entering={FadeInDown.delay(350).duration(500).easing(ease)} style={styles.dock}>
-          <Button variant="light" label="I did it" onPress={() => navigation.replace('Complete')} />
+          <Button variant="light" label="I did it" onPress={() => navigation.replace('Complete', { itemId: item.id })} />
           <Button variant="ghost" color="#fff" label="Not today" onPress={() => navigation.goBack()} />
         </Animated.View>
       </SafeAreaView>
@@ -60,10 +63,18 @@ export function FocusScreen({ navigation }: NativeStackScreenProps<RootStackPara
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  glow: { position: 'absolute', right: -110, top: -80 },
   body: { flex: 1, paddingHorizontal: 22, paddingTop: 18 },
   top: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 30 },
   close: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 34, lineHeight: 36, marginBottom: 26 },
-  tip: { padding: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.13)', marginBottom: 9 },
+  tip: {
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    marginBottom: 9,
+  },
   dock: { paddingHorizontal: 22, paddingBottom: 12, paddingTop: 8 },
 });

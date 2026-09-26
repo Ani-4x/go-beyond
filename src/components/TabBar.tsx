@@ -1,4 +1,5 @@
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -12,12 +13,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { fonts } from '../theme/tokens';
+import { fonts, glowElevation } from '../theme/tokens';
 import { AppText } from './AppText';
 import { Icon, IconName } from './Icons';
 import { PressableScale } from './PressableScale';
 
-const ICONS: Record<string, IconName> = { Today: 'sunrise', Zone: 'rings', Journal: 'journal' };
+const ICONS: Record<string, IconName> = { Today: 'sunrise', Zone: 'rings', Journal: 'journal', Profile: 'account' };
 
 function TabItem({ label, icon, focused, onPress }: { label: string; icon: IconName; focused: boolean; onPress: () => void }) {
   const t = useTheme();
@@ -49,42 +50,74 @@ function TabItem({ label, icon, focused, onPress }: { label: string; icon: IconN
           <Icon name={icon} color={focused ? t.accent : t.muted} />
         </Animated.View>
       </Animated.View>
-      <AppText variant="caption" color={focused ? t.ink : t.muted} style={{ fontFamily: focused ? fonts.semibold : fonts.medium }}>
+      <AppText variant="caption" color={focused ? t.ink : t.muted} style={{ fontFamily: focused ? fonts.semibold : fonts.medium, fontSize: 11.5 }}>
         {label}
       </AppText>
     </PressableScale>
   );
 }
 
+/**
+ * Docks flush with the bottom of the screen, with a frosted-glass background — matching the
+ * reference design exactly rather than floating above the content.
+ */
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const isDark = t.scheme === 'dark';
+
   return (
-    <View style={[styles.bar, { backgroundColor: t.surface, borderTopColor: t.line, paddingBottom: Math.max(insets.bottom, 12) }]}>
-      {state.routes.map((route, index) => {
-        const focused = state.index === index;
-        return (
-          <TabItem
-            key={route.key}
-            label={route.name}
-            icon={ICONS[route.name] ?? 'sunrise'}
-            focused={focused}
-            onPress={() => {
-              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-              if (!focused && !event.defaultPrevented) {
-                Haptics.selectionAsync().catch(() => {});
-                navigation.navigate(route.name, route.params);
-              }
-            }}
-          />
-        );
-      })}
+    <View style={[styles.wrap, glowElevation('#0B1330', isDark ? 0.4 : 0.1)]}>
+      <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
+        <BlurView intensity={isDark ? 36 : 68} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: isDark ? 'rgba(22,26,47,0.82)' : 'rgba(255,255,255,0.85)' },
+          ]}
+        />
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            styles.topBorder,
+            { borderColor: isDark ? 'rgba(255,255,255,0.09)' : 'rgba(108,92,231,0.12)' },
+          ]}
+        />
+        {state.routes.map((route, index) => {
+          const focused = state.index === index;
+          return (
+            <TabItem
+              key={route.key}
+              label={route.name}
+              icon={ICONS[route.name] ?? 'sunrise'}
+              focused={focused}
+              onPress={() => {
+                const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                if (!focused && !event.defaultPrevented) {
+                  Haptics.selectionAsync().catch(() => {});
+                  navigation.navigate(route.name, route.params);
+                }
+              }}
+            />
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', paddingTop: 8, paddingHorizontal: 14, borderTopWidth: 1.5 },
+  wrap: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  bar: {
+    flexDirection: 'row',
+    paddingTop: 12,
+    paddingHorizontal: 10,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+  },
+  topBorder: { borderTopWidth: 1 },
   item: { flex: 1, alignItems: 'center', gap: 3 },
   pill: { height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
 });

@@ -5,6 +5,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
 import { Button } from '../components/Button';
+import { GlowField } from '../components/GlowField';
 import { Legend } from '../components/Legend';
 import { RadarChart } from '../components/RadarChart';
 import { StaggerIn, WordReveal } from '../components/StaggerIn';
@@ -23,6 +24,7 @@ export function RevealScreen(_props: NativeStackScreenProps<RootStackParamList, 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       <View style={styles.body}>
+        <GlowField color={t.accent} size={460} opacity={0.36} style={[styles.ambientGlow, { left: width / 2 - 230 }]} />
         <WordReveal text="This is your starting zone." />
         <View style={{ marginTop: 14 }}>
           <RadarChart from={ZERO_ZONE} to={state.zone} focus={weakestDim(state.zone)} width={width - 44} delay={450} />
@@ -49,5 +51,6 @@ export function RevealScreen(_props: NativeStackScreenProps<RootStackParamList, 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   body: { flex: 1, paddingHorizontal: 22, paddingTop: 34 },
+  ambientGlow: { position: 'absolute', top: -10 },
   dock: { paddingHorizontal: 22, paddingBottom: 12, paddingTop: 8 },
 });

@@ -6,14 +6,15 @@ export type TabParamList = {
   Today: undefined;
   Zone: undefined;
   Journal: { openCapture?: boolean } | undefined;
+  Profile: undefined;
 };
 
 export type RootStackParamList = {
   Baseline: undefined;
   Reveal: undefined;
   Main: NavigatorScreenParams<TabParamList> | undefined;
-  Focus: undefined;
-  Complete: undefined;
+  Focus: { itemId: string };
+  Complete: { itemId: string };
 };
 
 /** Navigation prop for a tab screen that can also open root-stack screens. */

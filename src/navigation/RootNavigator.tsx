@@ -10,6 +10,7 @@ import { BaselineScreen } from '../screens/BaselineScreen';
 import { CompleteScreen } from '../screens/CompleteScreen';
 import { FocusScreen } from '../screens/FocusScreen';
 import { JournalScreen } from '../screens/JournalScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
 import { RevealScreen } from '../screens/RevealScreen';
 import { TodayScreen } from '../screens/TodayScreen';
 import { ZoneScreen } from '../screens/ZoneScreen';
@@ -31,6 +32,7 @@ function Tabs() {
       <Tab.Screen name="Today" component={TodayScreen} />
       <Tab.Screen name="Zone" component={ZoneScreen} />
       <Tab.Screen name="Journal" component={JournalScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }

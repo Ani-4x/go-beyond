@@ -21,6 +21,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useStore } from '../state/store';
 import { ease, spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
+import { glowElevation, surfaceElevation } from '../theme/tokens';
 
 function OptionRow({ label, selected, index, onPress }: { label: string; selected: boolean; index: number; onPress: () => void }) {
   const t = useTheme();
@@ -38,7 +39,11 @@ function OptionRow({ label, selected, index, onPress }: { label: string; selecte
         onPress={onPress}
         accessibilityRole="radio"
         accessibilityState={{ selected }}
-        style={[styles.option, { backgroundColor: selected ? t.tint : t.surface, borderColor: selected ? t.accent : t.line }]}
+        style={[
+          styles.option,
+          { backgroundColor: selected ? t.tint : t.surface, borderColor: selected ? t.accent : t.line },
+          selected ? glowElevation(t.accent, 0.16) : null,
+        ]}
       >
         <View style={[styles.dot, { borderColor: selected ? t.accent : t.line, backgroundColor: selected ? t.accent : 'transparent' }]}>
           <Animated.View style={[styles.dotInner, { backgroundColor: t.bg }, inner]} />
@@ -85,7 +90,7 @@ export function BaselineScreen({ navigation }: NativeStackScreenProps<RootStackP
             onPress={() => setIndex((i) => Math.max(0, i - 1))}
             scaleTo={0.9}
             accessibilityLabel="Back"
-            style={[styles.back, { backgroundColor: t.surface, borderColor: t.line }]}
+            style={[styles.back, surfaceElevation(t)]}
           >
             <Icon name="back" color={t.ink} />
           </PressableScale>
@@ -121,11 +126,12 @@ export function BaselineScreen({ navigation }: NativeStackScreenProps<RootStackP
 const styles = StyleSheet.create({
   root: { flex: 1 },
   top: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, paddingTop: 18, paddingBottom: 26 },
-  back: { width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   count: { minWidth: 28, textAlign: 'right' },
   body: { paddingHorizontal: 22, paddingBottom: 20 },
   options: { gap: 10, marginTop: 26 },
   option: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, paddingVertical: 16, borderRadius: 18, borderWidth: 1.5 },
+  // borderWidth above stays for the unselected/selected radio affordance; glowElevation adds the lift when selected.
   dot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   dotInner: { width: 8, height: 8, borderRadius: 4 },
   dock: { paddingHorizontal: 22, paddingBottom: 12, paddingTop: 8 },
