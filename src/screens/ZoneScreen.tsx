@@ -6,6 +6,7 @@ import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withDelay, with
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AccountSheet } from '../components/AccountSheet';
 import { AppText } from '../components/AppText';
+import { Button } from '../components/Button';
 import { GlowField } from '../components/GlowField';
 import { Icon } from '../components/Icons';
 import { Legend } from '../components/Legend';
@@ -13,8 +14,10 @@ import { PressableScale } from '../components/PressableScale';
 import { RadarChart } from '../components/RadarChart';
 import { StaggerIn } from '../components/StaggerIn';
 import { DIMENSIONS, DIMENSION_STYLE, EDGE_GAP } from '../data/content';
+import { useNavigation } from '@react-navigation/native';
 import { useReplayKey } from '../lib/hooks';
-import type { TabParamList } from '../navigation/types';
+import type { TabParamList, TabScreenNav } from '../navigation/types';
+import { useMonetization } from '../state/monetization';
 import { useStore, weakestDim } from '../state/store';
 import { ease } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
@@ -68,9 +71,10 @@ function NextEdgeCard({ zone }: { zone: number[] }) {
   );
 }
 
-function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
+function ZoneContent({ onOpenAccount, onOpenPaywall }: { onOpenAccount: () => void; onOpenPaywall: () => void }) {
   const t = useTheme();
   const { state } = useStore();
+  const { isPro } = useMonetization();
   const { width } = useWindowDimensions();
 
   const [from] = useState(() => {
@@ -103,28 +107,46 @@ function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
           <Icon name="gear" size={18} color={t.ink} />
         </PressableScale>
       </StaggerIn>
-      <StaggerIn index={1} style={{ marginTop: 8 }}>
-        <RadarChart from={from} to={state.zone} focus={weakestDim(state.zone)} width={width - 44} delay={150} />
-        <Legend
-          items={[
-            { label: 'Comfortable', kind: 'zone' },
-            { label: 'Edge', kind: 'edge' },
-            { label: "Next up", kind: 'focus' },
-          ]}
-        />
-      </StaggerIn>
+      {isPro ? (
+        <>
+          <StaggerIn index={1} style={{ marginTop: 8 }}>
+            <RadarChart from={from} to={state.zone} focus={weakestDim(state.zone)} width={width - 44} delay={150} />
+            <Legend
+              items={[
+                { label: 'Comfortable', kind: 'zone' },
+                { label: 'Edge', kind: 'edge' },
+                { label: "Next up", kind: 'focus' },
+              ]}
+            />
+          </StaggerIn>
 
-      <StaggerIn index={2}>
-        <NextEdgeCard zone={state.zone} />
-      </StaggerIn>
+          <StaggerIn index={2}>
+            <NextEdgeCard zone={state.zone} />
+          </StaggerIn>
 
-      <StaggerIn index={3} style={{ marginTop: 4, marginBottom: 2 }}>
-        <AppText variant="label" muted style={{ fontSize: 14 }}>Detailed progress</AppText>
-      </StaggerIn>
+          <StaggerIn index={3} style={{ marginTop: 4, marginBottom: 2 }}>
+            <AppText variant="label" muted style={{ fontSize: 14 }}>Detailed progress</AppText>
+          </StaggerIn>
 
-      {DIMENSIONS.map((label, i) => (
-        <DimRow key={label} index={i} label={label} value={state.zone[i]} fromValue={from[i]} />
-      ))}
+          {DIMENSIONS.map((label, i) => (
+            <DimRow key={label} index={i} label={label} value={state.zone[i]} fromValue={from[i]} />
+          ))}
+        </>
+      ) : (
+        <StaggerIn index={1} style={{ marginTop: 26 }}>
+          <View style={[styles.lockedCard, surfaceElevation(t)]}>
+            <View style={[styles.lockedIcon, { backgroundColor: t.tint }]}>
+              <Icon name="chart" size={22} color={t.accent} />
+            </View>
+            <AppText variant="caption" color={t.accent} style={styles.proLabel}>GO BEYOND PRO</AppText>
+            <AppText variant="title" style={{ marginTop: 8 }}>Your zone graph is a Pro insight</AppText>
+            <AppText variant="small" muted style={{ marginTop: 8, lineHeight: 21 }}>
+              Unlock your six-dimension growth graph, see your next edge, and follow detailed progress over time.
+            </AppText>
+            <Button label="Unlock Go Beyond Pro" onPress={onOpenPaywall} style={{ marginTop: 18 }} />
+          </View>
+        </StaggerIn>
+      )}
     </ScrollView>
   );
 }
@@ -133,10 +155,11 @@ function ZoneContent({ onOpenAccount }: { onOpenAccount: () => void }) {
 export function ZoneScreen(_props: BottomTabScreenProps<TabParamList, 'Zone'>) {
   const t = useTheme();
   const replay = useReplayKey();
+  const navigation = useNavigation<TabScreenNav<'Zone'>>();
   const [account, setAccount] = useState(false);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ZoneContent key={replay} onOpenAccount={() => setAccount(true)} />
+      <ZoneContent key={replay} onOpenAccount={() => setAccount(true)} onOpenPaywall={() => navigation.navigate('Paywall')} />
       <AccountSheet visible={account} onClose={() => setAccount(false)} />
     </SafeAreaView>
   );
@@ -149,6 +172,9 @@ const styles = StyleSheet.create({
   accountBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   nextEdge: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: radius.lg, marginTop: 16, marginBottom: 4 },
   nextEdgeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  lockedCard: { padding: 20, borderRadius: radius.lg },
+  lockedIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  proLabel: { letterSpacing: 1.4, fontSize: 11 },
   dim: { paddingVertical: 12, borderTopWidth: 1.5 },
   dimHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },

@@ -19,7 +19,10 @@ export type IconName =
   | 'flame'
   | 'account'
   | 'brain'
+  | 'reflect'
   | 'run'
+  | 'connect'
+  | 'build'
   | 'people'
   | 'pin'
   | 'chart'
@@ -29,7 +32,8 @@ export type IconName =
   | 'chevronRight'
   | 'gear'
   | 'trash'
-  | 'edit';
+  | 'edit'
+  | 'mail';
 
 type Props = { name: IconName; size?: number; color: string; strokeWidth?: number };
 
@@ -74,6 +78,12 @@ export function Icon({ name, size = 20, color, strokeWidth = 2.2 }: Props) {
           <Path d="M9 9.5c.8-1 2-1 2.4 0 .4 1-.4 1.4-.4 2.5 0 1.3 1.6 1.3 1.6 0 0-1.1-.6-1.5-.2-2.5.4-1 1.6-1 2.4 0" {...stroke} />
         </>
       )}
+      {name === 'reflect' && (
+        <>
+          <Path d="M12 7c-2.2-1.8-5.4-2.2-8-1v12c2.6-1.2 5.8-.8 8 1 2.2-1.8 5.4-2.2 8-1V6c-2.6-1.2-5.8-.8-8 1z" {...stroke} />
+          <Path d="M12 7v12M7 9.5c1.4-.4 2.6-.2 3.5.4M17 9.5c-1.4-.4-2.6-.2-3.5.4" {...stroke} />
+        </>
+      )}
       {name === 'run' && (
         <>
           <Circle cx="14.5" cy="5.5" r="1.8" fill={color} />
@@ -87,6 +97,14 @@ export function Icon({ name, size = 20, color, strokeWidth = 2.2 }: Props) {
           <Path d="M4 19c.6-3 2.4-4.6 5-4.6s4.4 1.6 5 4.6M14.3 14.7c2 .2 3.2 1.7 3.7 4.3" {...stroke} />
         </>
       )}
+      {name === 'connect' && (
+        <>
+          <Circle cx="12" cy="6.5" r="2.1" {...stroke} />
+          <Circle cx="6.5" cy="9" r="1.7" {...stroke} />
+          <Circle cx="17.5" cy="9" r="1.7" {...stroke} />
+          <Path d="M8.2 18c.3-2.7 1.6-4.2 3.8-4.2s3.5 1.5 3.8 4.2M2.8 17.5c.2-2.2 1.2-3.4 3-3.4 1.1 0 1.9.5 2.4 1.4M15.8 15.5c.5-.9 1.3-1.4 2.4-1.4 1.8 0 2.8 1.2 3 3.4" {...stroke} />
+        </>
+      )}
       {name === 'pin' && (
         <>
           <Path d="M12 21s6.5-6.1 6.5-11A6.5 6.5 0 0 0 5.5 10c0 4.9 6.5 11 6.5 11z" {...stroke} />
@@ -95,7 +113,13 @@ export function Icon({ name, size = 20, color, strokeWidth = 2.2 }: Props) {
       )}
       {name === 'chart' && (
         <>
-          <Path d="M4 20V13M10 20V7M16 20V10.5M20 20V4" {...stroke} />
+          <Path d="M4 20h16M6.5 17v-4M11.5 17V9M16.5 17V5" {...stroke} />
+        </>
+      )}
+      {name === 'build' && (
+        <>
+          <Path d="M4 19h16M6 16v-3M11 16V9M16 16V5" {...stroke} />
+          <Path d="m5 9 5-3 4 1 5-4M16 3h3v3" {...stroke} />
         </>
       )}
       {name === 'leaf' && (
@@ -137,6 +161,12 @@ export function Icon({ name, size = 20, color, strokeWidth = 2.2 }: Props) {
         <>
           <Path d="M4 20l.9-4 10.6-10.6 3.1 3.1L8 19l-4 1z" {...stroke} />
           <Path d="M13.6 7.3l3.1 3.1" {...stroke} />
+        </>
+      )}
+      {name === 'mail' && (
+        <>
+          <Rect x="3" y="5" width="18" height="14" rx="3" {...stroke} />
+          <Path d="m4.5 7 7.5 6 7.5-6" {...stroke} />
         </>
       )}
     </Svg>

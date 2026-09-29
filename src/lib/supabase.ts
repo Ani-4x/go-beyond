@@ -30,6 +30,8 @@ export type ProfileRow = {
   last_completed: string | null;
   today: unknown;
   onboarded: boolean;
+  completed_challenges: number;
+  last_push_me_date: string | null;
 };
 
 export type EntryRow = {

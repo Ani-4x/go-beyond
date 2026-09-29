@@ -168,11 +168,11 @@ export const DIMENSION_STYLE: Record<DimIndex, { color: string; icon: IconName }
 };
 
 export const MOMENT_CATEGORIES: { key: string; hint: string; color: string; icon: IconName }[] = [
-  { key: 'Reflect', hint: 'Learn, read, or think.', color: '#8B7FFF', icon: 'brain' },
+  { key: 'Reflect', hint: 'Learn, read, or think.', color: '#8B7FFF', icon: 'reflect' },
   { key: 'Move', hint: 'Exercise or get outside.', color: '#5B8DEF', icon: 'run' },
-  { key: 'Connect', hint: 'Spend time with someone.', color: '#6C6FE0', icon: 'people' },
+  { key: 'Connect', hint: 'Spend time with someone.', color: '#6C6FE0', icon: 'connect' },
   { key: 'Explore', hint: 'Try or visit something new.', color: '#4FA8E8', icon: 'pin' },
-  { key: 'Build', hint: 'Work toward a goal.', color: '#FF9F45', icon: 'chart' },
+  { key: 'Build', hint: 'Work toward a goal.', color: '#FF9F45', icon: 'build' },
   { key: 'Reset', hint: 'Rest and make space.', color: '#4CC38A', icon: 'leaf' },
 ];
 

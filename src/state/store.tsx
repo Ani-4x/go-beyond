@@ -14,6 +14,7 @@ import { generateChallenge, embedEntry } from '../lib/ai';
 import { dayKey, yesterdayKey } from '../lib/date';
 import { EntryRow, ProfileRow, supabase } from '../lib/supabase';
 import { useAuth } from './auth';
+import { useMonetization } from './monetization';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -44,6 +45,8 @@ export type QuestItem = {
   aiMinutes?: number;
   aiTips?: [string, string, string];
   aiDoneText?: string;
+  /** A once-per-day Pro challenge generated above the usual adaptive difficulty. */
+  isPushMe?: boolean;
 };
 
 export type TodayQuests = {
@@ -66,6 +69,10 @@ export type Persisted = {
   completedDays: string[];
   today: TodayQuests | null;
   entries: Entry[];
+  /** Monotonic account-level total; retained when journal history is cleared. */
+  completedChallengeCount: number;
+  /** Account-level daily Push Me usage; retained when progress is reset. */
+  lastPushMeDate: string | null;
 };
 
 export type State = Persisted & { ready: boolean };
@@ -82,6 +89,8 @@ const EMPTY: Persisted = {
   completedDays: [],
   today: null,
   entries: [],
+  completedChallengeCount: 0,
+  lastPushMeDate: null,
 };
 
 /* ------------------------------------------------------------------ */
@@ -154,6 +163,8 @@ function fromRows(profile: ProfileRow | null, entryRows: EntryRow[]): Persisted 
     completedDays: computeCompletedDays(entries),
     today,
     entries,
+    completedChallengeCount: Math.max(profile?.completed_challenges ?? 0, entries.filter((e) => e.type === 'challenge').length),
+    lastPushMeDate: profile?.last_push_me_date ?? null,
   };
 }
 
@@ -177,6 +188,7 @@ type Action =
       doneText: string;
     }
   | { type: 'swipeCandidate'; id: string; accept: boolean }
+  | { type: 'addPushMe'; item: QuestItem; date: string }
   | { type: 'completeItem'; itemId: string; entryId: string; feel?: string; now: number }
   | { type: 'addMoment'; id: string; title: string; tag: string; feel?: string; note?: string; now: number }
   | { type: 'deleteEntry'; id: string }
@@ -233,6 +245,13 @@ function reducer(state: State, action: Action): State {
       return { ...state, today: { ...t, pool, accepted } };
     }
 
+    case 'addPushMe': {
+      const t = state.today;
+      if (!t || t.date !== action.date || t.accepted.some((item) => item.isPushMe)) return state;
+      if (state.lastPushMeDate === action.date) return state;
+      return { ...state, lastPushMeDate: action.date, today: { ...t, accepted: [...t.accepted, action.item] } };
+    }
+
     case 'completeItem': {
       const t = state.today;
       const item = t?.accepted.find((i) => i.id === action.itemId);
@@ -252,7 +271,7 @@ function reducer(state: State, action: Action): State {
       const entry: Entry = {
         id: action.entryId,
         type: 'challenge',
-        title: CHALLENGES[item.dim][item.level].done,
+        title: item.aiDoneText ?? CHALLENGES[item.dim][item.level].done,
         tag: DIMENSIONS[item.dim],
         feel: action.feel,
         ts: action.now,
@@ -267,6 +286,7 @@ function reducer(state: State, action: Action): State {
           allDone && !state.completedDays.includes(key) ? [...state.completedDays, key] : state.completedDays,
         today: { ...t, accepted },
         entries: [entry, ...state.entries],
+        completedChallengeCount: state.completedChallengeCount + 1,
       };
     }
 
@@ -353,6 +373,7 @@ type Store = {
   setName: (name: string) => void;
   ensureToday: () => void;
   swipeCandidate: (id: string, accept: boolean) => void;
+  requestPushMe: () => Promise<boolean>;
   completeItem: (itemId: string, feel?: string) => void;
   addMoment: (m: { title: string; tag: string; feel?: string; note?: string }) => void;
   deleteEntry: (id: string) => void;
@@ -363,10 +384,12 @@ const StoreContext = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const { userId } = useAuth();
+  const { isPro } = useMonetization();
   const [state, dispatch] = useReducer(reducer, { ...EMPTY, ready: false });
 
   // IDs already written to (or read from) Supabase, so the sync effect below never re-inserts them.
   const syncedEntryIds = useRef<Set<string>>(new Set());
+  const pushMeRequestInFlight = useRef(false);
   // Guards against a slow fetch from a previous user landing after a new one has signed in.
   const requestId = useRef(0);
 
@@ -405,11 +428,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           last_completed: state.lastCompleted,
           today: state.today,
           onboarded: state.onboarded,
+          last_push_me_date: state.lastPushMeDate,
         })
         .eq('id', userId),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.ready, userId, state.name, state.zone, state.xp, state.streak, state.lastCompleted, state.today, state.onboarded]);
+  }, [state.ready, userId, state.name, state.zone, state.xp, state.streak, state.lastCompleted, state.today, state.onboarded, state.lastPushMeDate]);
 
   // Insert any journal entries that haven't made it to Supabase yet.
   useEffect(() => {
@@ -475,6 +499,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (id: string, accept: boolean) => dispatch({ type: 'swipeCandidate', id, accept }),
     [],
   );
+  const requestPushMe = useCallback(async () => {
+    const today = state.today;
+    if (
+      !isPro ||
+      !today ||
+      today.date !== dayKey(Date.now()) ||
+      state.lastPushMeDate === today.date ||
+      today.accepted.some((item) => item.isPushMe)
+    ) return false;
+    if (pushMeRequestInFlight.current) return false;
+
+    pushMeRequestInFlight.current = true;
+    try {
+      const dim = weakestDim(state.zone);
+      const level = Math.min(3, levelFor(state.zone[dim]) + 1) as Level;
+      const exclude = [...today.pool, ...today.accepted].map((item) =>
+        item.aiText ?? CHALLENGES[item.dim][item.level].text);
+      const result = await generateChallenge(dim, level, { pushMe: true, exclude });
+      if (!result || dayKey(Date.now()) !== today.date) return false;
+      const item: QuestItem = {
+        id: Crypto.randomUUID(), dim, level, done: false, isPushMe: true,
+        aiText: result.text, aiMinutes: result.minutes, aiTips: result.tips, aiDoneText: result.done,
+      };
+      dispatch({
+        type: 'addPushMe',
+        item,
+        date: today.date,
+      });
+      return true;
+    } finally {
+      pushMeRequestInFlight.current = false;
+    }
+  }, [isPro, state.today, state.zone, state.lastPushMeDate]);
   const completeItem = useCallback(
     (itemId: string, feel?: string) =>
       dispatch({ type: 'completeItem', itemId, entryId: Crypto.randomUUID(), feel, now: Date.now() }),
@@ -496,6 +553,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [userId],
   );
   const resetAll = useCallback(() => {
+    const completedChallengeCount = state.completedChallengeCount;
+    const lastPushMeDate = state.lastPushMeDate;
     if (userId) {
       syncedEntryIds.current = new Set();
       supabase
@@ -509,8 +568,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
         .then(({ error }) => error && console.warn('[go-beyond] reset (profile) failed:', error.message));
     }
-    dispatch({ type: 'reset' });
-  }, [userId]);
+    dispatch({ type: 'hydrate', data: { ...EMPTY, completedChallengeCount, lastPushMeDate } });
+  }, [userId, state.completedChallengeCount, state.lastPushMeDate]);
 
   const value = useMemo<Store>(
     () => ({
@@ -520,6 +579,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setName,
       ensureToday,
       swipeCandidate,
+      requestPushMe,
       completeItem,
       addMoment,
       deleteEntry,
@@ -532,6 +592,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setName,
       ensureToday,
       swipeCandidate,
+      requestPushMe,
       completeItem,
       addMoment,
       deleteEntry,

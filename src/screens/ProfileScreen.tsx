@@ -1,8 +1,9 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
@@ -11,9 +12,10 @@ import { Icon } from '../components/Icons';
 import { PressableScale } from '../components/PressableScale';
 import { StaggerIn } from '../components/StaggerIn';
 import { useReplayKey } from '../lib/hooks';
-import type { TabParamList } from '../navigation/types';
+import type { TabParamList, TabScreenNav } from '../navigation/types';
 import { useAuth } from '../state/auth';
 import { useStore } from '../state/store';
+import { useMonetization } from '../state/monetization';
 import { ease } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { brand, fonts, gradients, glowElevation, radius, surfaceElevation } from '../theme/tokens';
@@ -105,9 +107,15 @@ function NameField({ name, email }: { name: string | null; email: string }) {
 
 function ProfileContent() {
   const t = useTheme();
-  const { session, signOut } = useAuth();
+  const { session, signOut, deleteAccount } = useAuth();
   const { state, resetAll } = useStore();
+  const { isPro, manageSubscription } = useMonetization();
+  const navigation = useNavigation<TabScreenNav<'Profile'>>();
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [subscriptionNotice, setSubscriptionNotice] = useState<string | null>(null);
 
   const email = session?.user.email ?? '';
   const initial = (state.name || email).charAt(0).toUpperCase() || '?';
@@ -121,6 +129,18 @@ function ProfileContent() {
 
   const challenges = state.entries.filter((e) => e.type === 'challenge').length;
   const moments = state.entries.filter((e) => e.type === 'moment').length;
+
+  const performAccountDeletion = async () => {
+    setDeletingAccount(true);
+    setDeleteAccountError(null);
+    try {
+      await deleteAccount();
+    } catch (error) {
+      setDeleteAccountError(error instanceof Error ? error.message : 'We could not delete your account. Please try again.');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -156,6 +176,29 @@ function ProfileContent() {
       </StaggerIn>
 
       <StaggerIn index={4} style={{ marginTop: 28 }}>
+        <View style={[styles.card, surfaceElevation(t), { marginTop: 0, marginBottom: 22 }]}>
+          <View style={styles.proHeader}>
+            <AppText variant="label">Go Beyond Pro</AppText>
+            {isPro && <AppText variant="caption" color="#65D6A2">ACTIVE</AppText>}
+          </View>
+          <AppText variant="small" muted style={{ marginTop: 4 }}>
+            {isPro ? 'Unlimited challenges, Push Me, and zone insights.' : `${Math.min(state.completedChallengeCount, 5)} of 5 free challenges completed.`}
+          </AppText>
+          {isPro && (
+            <PressableScale
+              onPress={() => manageSubscription().catch((error: unknown) => {
+                setSubscriptionNotice(error instanceof Error ? error.message : 'Could not open subscription settings.');
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Manage or cancel subscription"
+              style={styles.manageSubscriptionButton}
+            >
+              <AppText variant="small" color="#FF6574">Manage subscription</AppText>
+              <Icon name="chevronRight" size={15} color="#FF6574" />
+            </PressableScale>
+          )}
+          {!isPro && <Button label="Explore Pro" onPress={() => navigation.navigate('Paywall')} style={{ marginTop: 12 }} />}
+        </View>
         <AppText variant="label" muted style={{ marginBottom: 10, fontSize: 14 }}>Account</AppText>
         <Button
           variant="light"
@@ -180,7 +223,109 @@ function ProfileContent() {
             resetAll();
           }}
         />
+        <View style={styles.dangerZone}>
+          <AppText variant="label" color="#FF6574">Danger zone</AppText>
+          <AppText variant="caption" muted style={{ marginTop: 4 }}>
+            Permanently remove your account and all Go Beyond data.
+          </AppText>
+          <PressableScale
+            onPress={() => {
+              setDeleteAccountError(null);
+              setDeleteConfirmationVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account permanently"
+            style={styles.deleteAccountButton}
+          >
+            <AppText variant="small" color="#FF6574">Delete account</AppText>
+          </PressableScale>
+        </View>
       </StaggerIn>
+      <Modal
+        visible={deleteConfirmationVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => !deletingAccount && setDeleteConfirmationVisible(false)}
+      >
+        <View style={[styles.confirmationBackdrop, { backgroundColor: t.backdrop }]}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !deletingAccount && setDeleteConfirmationVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss account deletion confirmation"
+          />
+          <View style={[styles.confirmationCard, surfaceElevation(t)]} accessibilityViewIsModal>
+            <View style={styles.confirmationIcon}>
+              <Icon name="trash" size={21} color="#FF6574" />
+            </View>
+            <AppText variant="title">Delete your account?</AppText>
+            <AppText variant="small" muted style={{ marginTop: 9, lineHeight: 21 }}>
+              Your profile, challenge history, and moments will be permanently deleted.
+            </AppText>
+            <AppText variant="small" muted style={{ marginTop: 8, lineHeight: 21 }}>
+              This does not cancel an App Store or Google Play subscription. Cancel it in Manage subscription before deleting your account.
+            </AppText>
+            {!!deleteAccountError && (
+              <AppText variant="caption" color="#FF6574" style={{ marginTop: 12 }}>
+                {deleteAccountError}
+              </AppText>
+            )}
+            <View style={styles.confirmationActions}>
+              <PressableScale
+                onPress={() => setDeleteConfirmationVisible(false)}
+                disabled={deletingAccount}
+                accessibilityRole="button"
+                style={[styles.confirmationButton, { backgroundColor: t.tint }]}
+              >
+                <AppText variant="small">Keep account</AppText>
+              </PressableScale>
+              <PressableScale
+                onPress={performAccountDeletion}
+                disabled={deletingAccount}
+                accessibilityRole="button"
+                style={[styles.confirmationButton, styles.confirmDeleteButton]}
+              >
+                {deletingAccount
+                  ? <ActivityIndicator color="#FFFFFF" />
+                  : <AppText variant="small" color="#FFFFFF">Delete account</AppText>}
+              </PressableScale>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={subscriptionNotice !== null}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setSubscriptionNotice(null)}
+      >
+        <View style={[styles.confirmationBackdrop, { backgroundColor: t.backdrop }]}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setSubscriptionNotice(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss subscription notice"
+          />
+          <View style={[styles.confirmationCard, surfaceElevation(t)]} accessibilityViewIsModal>
+            <View style={[styles.confirmationIcon, { backgroundColor: t.tint }]}>
+              <Icon name="gear" size={20} color={t.accent} />
+            </View>
+            <AppText variant="title">Subscription settings</AppText>
+            <AppText variant="small" muted style={{ marginTop: 9, lineHeight: 21 }}>
+              {subscriptionNotice}
+            </AppText>
+            <PressableScale
+              onPress={() => setSubscriptionNotice(null)}
+              accessibilityRole="button"
+              style={[styles.noticeButton, { backgroundColor: t.tint }]}
+            >
+              <AppText variant="small">Got it</AppText>
+            </PressableScale>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -212,4 +357,15 @@ const styles = StyleSheet.create({
   xpFill: { height: 8, borderRadius: 4, overflow: 'hidden' },
   statsRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   stat: { flex: 1, borderRadius: radius.lg, padding: 14, alignItems: 'flex-start' },
+  proHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  manageSubscriptionButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, marginTop: 12, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 13, backgroundColor: 'rgba(255,101,116,0.12)', borderWidth: 1, borderColor: 'rgba(255,101,116,0.3)' },
+  dangerZone: { marginTop: 24, padding: 16, borderRadius: radius.lg, borderWidth: 1, borderColor: 'rgba(255,101,116,0.25)', backgroundColor: 'rgba(255,101,116,0.055)' },
+  deleteAccountButton: { alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 2, paddingVertical: 6 },
+  confirmationBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  confirmationCard: { width: '100%', maxWidth: 420, padding: 22, borderRadius: 24 },
+  confirmationIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,101,116,0.14)', marginBottom: 16 },
+  confirmationActions: { flexDirection: 'row', gap: 10, marginTop: 22 },
+  confirmationButton: { minHeight: 46, flex: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  confirmDeleteButton: { backgroundColor: '#D94758' },
+  noticeButton: { minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
 });

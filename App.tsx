@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { AuthProvider } from './src/state/auth';
 import { StoreProvider } from './src/state/store';
+import { MonetizationProvider } from './src/state/monetization';
 import { ThemeProvider } from './src/theme/ThemeProvider';
 
 export default function App() {
@@ -28,9 +29,11 @@ export default function App() {
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>
-            <StoreProvider>
-              <RootNavigator />
-            </StoreProvider>
+            <MonetizationProvider>
+              <StoreProvider>
+                <RootNavigator />
+              </StoreProvider>
+            </MonetizationProvider>
           </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>

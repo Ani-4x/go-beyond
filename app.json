@@ -8,7 +8,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.gobeyond.app"
+      "bundleIdentifier": "com.gobeyond.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.gobeyond.app",
@@ -19,6 +22,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "477b960a-2e1d-45a0-a065-be716ba49532"
+      }
     }
   }
 }

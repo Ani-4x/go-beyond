@@ -27,6 +27,14 @@ type Props = {
 
 const TITLE_MAX = 200;
 
+function categoryTint(hex: string, opacity: number) {
+  const value = hex.replace('#', '');
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+}
+
 function CategoryCard({
   label,
   hint,
@@ -45,24 +53,22 @@ function CategoryCard({
   const t = useTheme();
   const pop = usePop(selected);
   return (
-    <Animated.View style={[styles.cardWrap, pop]}>
+    <Animated.View style={[styles.cardWrap, pop, selected ? glowElevation(color, 0.16) : null]}>
       <PressableScale
         haptic
         scaleTo={0.96}
         onPress={onPress}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        style={[
-          styles.card,
-          { borderColor: selected ? color : t.line, backgroundColor: selected ? color + '1c' : t.surface },
-          selected ? glowElevation(color, 0.16) : null,
-        ]}
+        style={styles.cardPressable}
       >
-        <View style={[styles.cardIcon, { backgroundColor: color + '26' }]}>
-          <Icon name={icon} size={18} color={color} />
+        <View style={[styles.card, { borderColor: selected ? color : t.line, backgroundColor: selected ? categoryTint(color, 0.14) : t.surface }]}>
+          <View style={[styles.cardIcon, { backgroundColor: categoryTint(color, 0.16) }]}>
+            <Icon name={icon} size={18} color={color} />
+          </View>
+          <AppText variant="label" style={{ fontSize: 15 }}>{label}</AppText>
+          <AppText variant="caption" muted style={{ fontFamily: fonts.body }}>{hint}</AppText>
         </View>
-        <AppText variant="label" style={{ fontSize: 15 }}>{label}</AppText>
-        <AppText variant="caption" muted style={{ fontFamily: fonts.body }}>{hint}</AppText>
       </PressableScale>
     </Animated.View>
   );
@@ -188,7 +194,8 @@ const styles = StyleSheet.create({
   q: { marginBottom: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
   cardWrap: { width: '48.6%' },
-  card: { padding: 12, borderRadius: 14, borderWidth: 1.5, gap: 6 },
+  cardPressable: { alignSelf: 'stretch' },
+  card: { minHeight: 132, padding: 12, borderRadius: 14, borderWidth: 1.5, gap: 6, overflow: 'hidden' },
   cardIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
   note: { minHeight: 90, borderRadius: 16, borderWidth: 1.5, paddingHorizontal: 16, paddingVertical: 14, fontFamily: fonts.body, fontSize: 15, textAlignVertical: 'top' },
