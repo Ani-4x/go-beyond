@@ -11,11 +11,13 @@ import { CompleteScreen } from '../screens/CompleteScreen';
 import { FocusScreen } from '../screens/FocusScreen';
 import { JournalScreen } from '../screens/JournalScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { PaywallScreen } from '../screens/PaywallScreen';
 import { RevealScreen } from '../screens/RevealScreen';
 import { TodayScreen } from '../screens/TodayScreen';
 import { ZoneScreen } from '../screens/ZoneScreen';
 import { useAuth } from '../state/auth';
 import { useStore } from '../state/store';
+import { useMonetization } from '../state/monetization';
 import { useTheme } from '../theme/ThemeProvider';
 import type { RootStackParamList, TabParamList } from './types';
 
@@ -41,6 +43,7 @@ export function RootNavigator() {
   const t = useTheme();
   const { status } = useAuth();
   const { state, ensureToday } = useStore();
+  const monetization = useMonetization();
 
   // Pick today's challenge once onboarding is done, and again whenever the app returns on a new day.
   useEffect(() => {
@@ -63,7 +66,7 @@ export function RootNavigator() {
   );
 
   // Loading the session, or (once signed in) loading this user's data from Supabase.
-  if (status === 'loading' || (status === 'signedIn' && !state.ready)) {
+  if (status === 'loading' || (status === 'signedIn' && (!state.ready || monetization.status === 'loading'))) {
     return <View style={{ flex: 1, backgroundColor: t.bg }} />;
   }
 
@@ -90,6 +93,7 @@ export function RootNavigator() {
             <Stack.Screen name="Main" component={Tabs} />
             <Stack.Screen name="Focus" component={FocusScreen} options={{ animation: 'fade_from_bottom' }} />
             <Stack.Screen name="Complete" component={CompleteScreen} options={{ animation: 'fade', gestureEnabled: false }} />
+            <Stack.Screen name="Paywall" component={PaywallScreen} options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
           </>
         )}
       </Stack.Navigator>

@@ -1,7 +1,5 @@
 // A thin wrapper around Google's Gemini API (free tier via Google AI Studio — see README for
-// how to get a key). Uses the stable `generateContent` endpoint rather than the newer
-// Interactions API: as of this writing Google's own docs mark Interactions as beta and
-// recommend generateContent for production use.
+// how to get a key). Uses `generateContent` with structured output for challenge JSON.
 //
 // Docs this was written against:
 //   https://ai.google.dev/api/generate-content
@@ -9,9 +7,15 @@
 
 const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
 
-/** Fast, free-tier-friendly, and stable. Swap for another `models.generateContent`-compatible
- *  id (e.g. a newer Flash release) if you'd like — see https://ai.google.dev/gemini-api/docs/models. */
-const GENERATION_MODEL = 'gemini-2.0-flash';
+// All listed models are stable and support structured output. Step down through
+// them if Google temporarily overloads one of the endpoints; Flash-Lite is the
+// final high-throughput fallback.
+const GENERATION_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+];
 
 /** Google's stable text embedding model. */
 const EMBEDDING_MODEL = 'gemini-embedding-001';
@@ -36,21 +40,32 @@ export async function generateJSON<T>(
   userPrompt: string,
   schema: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${API_ROOT}/models/${GENERATION_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey() },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: userPrompt }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: schema,
-        temperature: 0.9,
-      },
-    }),
+  const key = apiKey();
+  const requestBody = JSON.stringify({
+    contents: [{ parts: [{ text: userPrompt }] }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
   });
+  const requestModel = (model: string) => fetch(`${API_ROOT}/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: requestBody,
+  });
+  let model = GENERATION_MODELS[0];
+  let res: Response | null = null;
+  for (let i = 0; i < GENERATION_MODELS.length; i += 1) {
+    model = GENERATION_MODELS[i];
+    res = await requestModel(model);
+    if (res.status !== 503 || i === GENERATION_MODELS.length - 1) break;
+    console.warn(`[gemini] ${model} is overloaded; trying ${GENERATION_MODELS[i + 1]}.`);
+    try { await res.body?.cancel(); } catch { /* The next model is still worth trying. */ }
+  }
+  if (!res) throw new Error('Gemini generateContent did not return a response.');
   if (!res.ok) {
-    throw new Error(`Gemini generateContent failed (${res.status}): ${await res.text()}`);
+    throw new Error(`Gemini generateContent failed (${res.status}) using ${model}: ${await res.text()}`);
   }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;

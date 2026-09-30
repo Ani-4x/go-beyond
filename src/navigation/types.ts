@@ -15,6 +15,7 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<TabParamList> | undefined;
   Focus: { itemId: string };
   Complete: { itemId: string };
+  Paywall: undefined;
 };
 
 /** Navigation prop for a tab screen that can also open root-stack screens. */

@@ -3,7 +3,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -21,6 +21,7 @@ import { ScrollView } from 'react-native-gesture-handler';
 import { scheduleOnRN } from 'react-native-worklets';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from '../components/AppText';
+import { Button } from '../components/Button';
 import { DrawCheck, Icon } from '../components/Icons';
 import { MountainScene } from '../components/MountainScene';
 import { PressableScale } from '../components/PressableScale';
@@ -29,6 +30,7 @@ import { DIMENSION_STYLE, QUOTES, XP as XP_TABLE } from '../data/content';
 import { useReplayKey, useSeen } from '../lib/hooks';
 import type { TabParamList, TabScreenNav } from '../navigation/types';
 import { useAuth } from '../state/auth';
+import { useMonetization } from '../state/monetization';
 import { EnrichedItem, useStore, useTodayQuests } from '../state/store';
 import { spring } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
@@ -290,14 +292,39 @@ function ChecklistRow({ item, index, onPress }: { item: EnrichedItem; index: num
 function TodayContent() {
   const t = useTheme();
   const nav = useNavigation<TabScreenNav<'Today'>>();
-  const { state, swipeCandidate } = useStore();
+  const { state, swipeCandidate, requestPushMe } = useStore();
+  const { isPro } = useMonetization();
   const { session } = useAuth();
+  const [pushMeBusy, setPushMeBusy] = React.useState(false);
+  const [pushMeError, setPushMeError] = React.useState<string | null>(null);
   const quests = useTodayQuests();
 
   if (!quests) return <View style={{ flex: 1 }} />;
   const { pool, accepted, completedCount, total } = quests;
+  const pushMeItem = accepted.find((item) => item.isPushMe);
+  const pushMeUsedToday = state.lastPushMeDate === state.today?.date;
   const name = displayName(state.name, session?.user.email);
   const nothingChosen = pool.length === 0 && total === 0;
+  const openPushMe = async () => {
+    if (!isPro) {
+      nav.navigate('Paywall');
+      return;
+    }
+    if (pushMeItem) {
+      if (!pushMeItem.done) nav.navigate('Focus', { itemId: pushMeItem.id });
+      return;
+    }
+    if (pushMeUsedToday) return;
+    setPushMeBusy(true);
+    setPushMeError(null);
+    try {
+      const created = await requestPushMe();
+      if (!created) setPushMeError('Could not create a new Push Me challenge right now.');
+    } catch (error) {
+      setPushMeError(error instanceof Error ? error.message : 'Could not create your Push Me challenge.');
+    }
+    finally { setPushMeBusy(false); }
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -316,7 +343,45 @@ function TodayContent() {
       </StaggerIn>
 
       <StaggerIn index={2}>
-        <SwipeStack pool={pool} onSwipe={swipeCandidate} />
+        <PressableScale
+          onPress={openPushMe}
+          disabled={pushMeBusy || !!pushMeItem?.done || (pushMeUsedToday && !pushMeItem)}
+          accessibilityRole="button"
+          accessibilityLabel={pushMeItem?.done ? 'Today’s Push Me challenge is complete' : 'Get a Push Me challenge'}
+          accessibilityState={{ disabled: pushMeBusy || !!pushMeItem?.done || (pushMeUsedToday && !pushMeItem) }}
+          style={[styles.pushMeCard, surfaceElevation(t)]}
+        >
+          <View style={[styles.pushMeIcon, { backgroundColor: 'rgba(255,138,61,0.14)' }]}>
+            <Icon name="flame" size={19} color={brand.ember} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText variant="label">{pushMeItem?.done ? 'Push Me complete' : pushMeItem ? 'Your Push Me is ready' : 'Push Me'}</AppText>
+            <AppText variant="caption" muted={!pushMeError} color={pushMeError ? t.ember : undefined} style={{ marginTop: 2 }}>
+              {pushMeError ?? (pushMeItem?.done
+                ? 'You met today’s extra stretch.'
+                : state.lastPushMeDate === state.today?.date
+                  ? 'You’ve used today’s Push Me. Come back tomorrow for another.'
+                  : pushMeItem
+                    ? 'A harder challenge, shaped by your growth.'
+                    : isPro
+                      ? 'A once-a-day stretch beyond your usual difficulty.'
+                      : 'A harder, journal-personalized challenge with Go Beyond Pro.')}
+            </AppText>
+          </View>
+          {pushMeBusy ? <ActivityIndicator color={t.accent} /> : !pushMeItem && !isPro ? (
+            <AppText variant="caption" color={t.accent}>PRO</AppText>
+          ) : !pushMeItem?.done && (!pushMeUsedToday || !!pushMeItem) ? <Icon name="chevronRight" size={16} color={t.muted} /> : null}
+        </PressableScale>
+      </StaggerIn>
+
+      <StaggerIn index={3}>
+        {state.completedChallengeCount >= 5 && !isPro ? (
+          <View style={[styles.emptyStack, surfaceElevation(t), { flexDirection: 'column', alignItems: 'stretch' }]}>
+            <AppText variant="label">Your next edge is waiting</AppText>
+            <AppText variant="small" muted>Unlock Go Beyond Pro for unlimited personalized challenges and deeper growth tools.</AppText>
+            <Button label="Explore Go Beyond Pro" onPress={() => nav.navigate('Paywall')} />
+          </View>
+        ) : <SwipeStack pool={pool} onSwipe={swipeCandidate} />}
       </StaggerIn>
 
       {nothingChosen ? (
@@ -390,6 +455,8 @@ const styles = StyleSheet.create({
   swipeBtnAccept: { backgroundColor: brand.cobalt },
 
   emptyStack: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: radius.lg, padding: 16 },
+  pushMeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radius.lg, padding: 14 },
+  pushMeIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 },
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },

@@ -14,6 +14,7 @@ type Auth = {
   /** Verifies the code and completes sign-in. */
   verifyCode: (email: string, code: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const AuthContext = createContext<Auth | null>(null);
@@ -71,9 +72,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const { error } = await supabase.functions.invoke('delete-account', { body: {} });
+    if (error) {
+      let message = error.message;
+      const context = (error as { context?: { clone?: () => Response } }).context;
+      if (context && typeof context.clone === 'function') {
+        try {
+          const body = await context.clone().json() as { error?: unknown };
+          if (typeof body.error === 'string') message = body.error;
+        } catch {
+          // Keep the SDK error if the function response isn't JSON.
+        }
+      }
+      throw new Error(message);
+    }
+    // The account is already gone on the server, so only clear the device session.
+    await supabase.auth.signOut({ scope: 'local' });
+  }, []);
+
   const value = useMemo<Auth>(
-    () => ({ status, session, userId: session?.user.id ?? null, sendCode, verifyCode, signOut }),
-    [status, session, sendCode, verifyCode, signOut],
+    () => ({ status, session, userId: session?.user.id ?? null, sendCode, verifyCode, signOut, deleteAccount }),
+    [status, session, sendCode, verifyCode, signOut, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

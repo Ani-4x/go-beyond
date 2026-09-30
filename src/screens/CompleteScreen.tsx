@@ -15,6 +15,7 @@ import { DIMENSIONS, EDGE_GAP, FEELINGS } from '../data/content';
 import { useCountUp } from '../lib/hooks';
 import type { RootStackParamList } from '../navigation/types';
 import { previewCompletion, useStore } from '../state/store';
+import { useMonetization } from '../state/monetization';
 import { ease } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { brand, radius } from '../theme/tokens';
@@ -23,6 +24,7 @@ import { brand, radius } from '../theme/tokens';
 export function CompleteScreen({ navigation, route }: NativeStackScreenProps<RootStackParamList, 'Complete'>) {
   const t = useTheme();
   const { state, completeItem } = useStore();
+  const { isPro } = useMonetization();
   const { width } = useWindowDimensions();
   const [preview] = useState(() => previewCompletion(state, route.params.itemId)); // freeze before completeItem() changes state
   const [feel, setFeel] = useState<string | null>(null);
@@ -42,8 +44,13 @@ export function CompleteScreen({ navigation, route }: NativeStackScreenProps<Roo
   const origin = radarPoint(preview.dim, Math.min(1, preview.to[preview.dim] + EDGE_GAP), chartWidth);
 
   const save = () => {
+    if (!isPro && state.completedChallengeCount >= 5) {
+      navigation.navigate('Paywall');
+      return;
+    }
     completeItem(route.params.itemId, feel ?? undefined);
-    navigation.popTo('Main', { screen: 'Today' });
+    if (!isPro && state.completedChallengeCount === 4) navigation.replace('Paywall');
+    else navigation.popTo('Main', { screen: 'Today' });
   };
 
   return (
@@ -94,7 +101,7 @@ export function CompleteScreen({ navigation, route }: NativeStackScreenProps<Roo
       </ScrollView>
 
       <Animated.View entering={FadeInDown.delay(1500).duration(500).easing(ease)} style={styles.dock}>
-        <Button label="Save to journal" onPress={save} />
+        <Button label={!isPro && state.completedChallengeCount >= 5 ? 'Unlock unlimited challenges' : !isPro && state.completedChallengeCount === 4 ? 'Finish my 5th challenge' : 'Save to journal'} onPress={save} />
       </Animated.View>
     </SafeAreaView>
   );

@@ -1,0 +1,11 @@
+node_modules/
+.git/
+.expo/
+dist/
+coverage/
+*.log
+.env.local
+.env.*.local
+
+android/
+hs_err_pid20468.log
